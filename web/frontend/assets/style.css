@@ -1,0 +1,66 @@
+
+.Polaris-Text--subdued{
+    color: #a9a9a9;
+}
+
+.customRadio .Polaris-Choice__Control{
+    display:none;
+}
+
+.shipStatus-Pending .Polaris-Badge svg {
+    fill: rgb(109, 113, 117);
+}
+.shipStatus-Pending .Polaris-Badge  {
+    background-color: rgb(109, 113, 117,15%);
+    color: rgb(109, 113, 117);
+}
+.shipStatus-InfoRecived .Polaris-Badge  {
+    background-color: rgb(4,215,231,15%);
+    color: rgb(4,215,231);
+}
+.shipStatus-InfoRecived .Polaris-Badge svg {
+    fill: rgb(4,215,231);
+}
+
+.shipStatus-Pickup .Polaris-Badge svg {
+    fill: rgb(0, 160, 172);
+}
+.shipStatus-Pickup .Polaris-Badge  {
+    background-color: rgb(0, 160, 172,15%);
+    color: rgb(0, 160, 172);
+}
+.shipStatus-Transit .Polaris-Badge svg {
+    fill: rgb(30, 147, 235);
+}
+.shipStatus-Transit .Polaris-Badge  {
+    background-color: rgb(30, 147, 235,15%);
+    color: rgb(30, 147, 235);
+}
+.shipStatus-OutForDelivery .Polaris-Badge svg {
+    fill: rgb(252, 175, 48);
+}
+.shipStatus-OutForDelivery .Polaris-Badge  {
+    background-color: rgb(252, 175, 48,15%);
+    color: rgb(252, 175, 48);
+}
+.shipStatus-Delivered .Polaris-Badge svg {
+    fill: rgb(27, 190, 115);
+}
+.shipStatus-Delivered .Polaris-Badge  {
+    background-color: rgb(27, 190, 115,15%);
+    color: rgb(27, 190, 115);
+}
+.shipStatus-Exception .Polaris-Badge svg {
+    fill: rgb(253, 87, 73);
+}
+.shipStatus-Exception .Polaris-Badge  {
+    background-color: rgb(253, 87, 73,15%);
+    color: rgb(253, 87, 73);
+}
+.shipStatus-Expired .Polaris-Badge svg {
+    fill: rgb(186, 190, 195);
+}
+.shipStatus-Expired .Polaris-Badge  {
+    background-color: rgb(186, 190, 195,15%);
+    color: rgb(186, 190, 195);
+}

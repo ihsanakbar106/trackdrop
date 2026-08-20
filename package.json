@@ -1,0 +1,30 @@
+{
+    "name": "autotrack",
+    "version": "1.0.0",
+    "license": "UNLICENSED",
+    "scripts": {
+        "shopify": "shopify",
+        "build": "shopify app build",
+        "dev": "shopify app dev",
+        "push": "shopify app push",
+        "generate": "shopify app generate",
+        "deploy": "shopify app deploy",
+        "info": "shopify app info"
+    },
+    "dependencies": {
+        "@shopify/app": "^3.58.2",
+        "@shopify/cli": "^3.66.0",
+        "axios": "^1.6.2",
+        "dateformat": "^5.0.3",
+        "pusher-js": "^8.4.0-rc2",
+        "react-beautiful-dnd": "^13.1.1",
+        "react-router-dom": "^6.3.0"
+    },
+    "author": "lenovo",
+    "private": true,
+    "workspaces": [
+        "extensions/*",
+        "web",
+        "web/frontend"
+    ]
+}

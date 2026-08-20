@@ -1,0 +1,506 @@
+Shopify Expiring Offline Access Tokens — Complete Implementation Guide
+Purpose of this file
+
+This document explains the full Shopify expiring offline access token + refresh_token flow as implemented in the product-options-tlx Laravel/Shopify PHP app.
+
+It is written so that:
+
+A human developer can understand exactly where and why each piece exists.
+An AI coding agent (Cursor, Claude, Copilot, etc.) can read this file alone and port the same complete flow into another Shopify app project.
+Official Shopify references
+
+Offline access tokens
+Token exchange
+Apr 1, 2026 — required for new public apps
+Jan 1, 2027 — required for all public apps
+1. Problem this solves
+Old behavior (non-expiring offline tokens)
+On install, Shopify gave one offline access_token that never expired.
+Background jobs, webhooks, and admin API calls reused that token forever.
+If leaked, the token stayed valid indefinitely.
+New behavior (expiring offline tokens)
+When requesting with expiring=1, Shopify returns:
+
+Field	Meaning	Typical lifetime
+access_token	Used for Admin REST/GraphQL API	~60 minutes (expires_in: 3600)
+refresh_token	Used only to mint a new access token	~90 days (refresh_token_expires_in: 7776000)
+expires_in	Seconds until access token expires	3600
+refresh_token_expires_in	Seconds until refresh token expires	7776000
+scope	Granted scopes	—
+Symptom if refresh is not implemented
+After ~1 hour, Admin API calls fail with:
+
+[API] Invalid API key or access token (unrecognized login or wrong password)
+That happened in this project because tokens were stored, but almost nothing refreshed them before reuse.
+
+2. High-level architecture (required mental model)
+┌─────────────────────────────────────────────────────────────────┐
+│  ACQUIRE (install / merchant opens app)                         │
+│  A) OAuth authorization code + expiring=1                       │
+│  B) Token exchange (session JWT → offline token) + expiring=1 │
+│     Persist: access_token, refresh_token, expires_at,           │
+│              refresh_token_expires_at                           │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  USE (every Admin API call: HTTP, jobs, webhooks)               │
+│  Before using access_token:                                     │
+│    if expires within refresh buffer (e.g. 5 min)                │
+│      → POST grant_type=refresh_token                            │
+│      → save NEW access_token + NEW refresh_token                │
+│    then call Shopify Admin API                                  │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  RECOVER (merchant is present)                                  │
+│  If refresh fails / refresh_token expired:                      │
+│    → token exchange with App Bridge session JWT                 │
+│    OR redirect to /api/auth?shop=... for full OAuth             │
+└─────────────────────────────────────────────────────────────────┘
+Critical Shopify rules you must follow
+Always request expiring=1 when acquiring offline tokens (OAuth code exchange and token exchange).
+Always store the new refresh_token returned by every refresh. Old refresh tokens are invalidated after use.
+One refreshable offline token per app + shop. Acquiring a new expiring offline token retires older ones (old refresh token becomes invalid immediately; old access token may work until its expires_in).
+Refresh does not need the merchant present. Token exchange / OAuth does.
+If the 90-day refresh token expires, the merchant must reopen the app so you can exchange/OAuth again.
+Use config values, not raw env(), when php artisan config:cache is used in production.
+3. Where this project handles the flow (file map)
+Use this map when searching the codebase or porting.
+
+Concern	File(s) in this project	Role
+DB columns	web/database/migrations/*refresh_token*	Store refresh data
+Config (cache-safe)	web/config/shopify.php	api_key, api_secret, etc.
+Context bootstrap	web/app/Providers/AppServiceProvider.php	Initializes Shopify SDK from config('shopify.*')
+OAuth install with expiring=1	web/app/Lib/ExpiringOfflineOAuth.php	Authorization-code → expiring offline token
+OAuth routes	web/routes/web.php (/api/auth, /api/auth/callback)	Install/reauth entrypoints
+Central refresh + exchange	web/app/Lib/TokenExchange.php	Core logic for refresh / exchange / ensure-fresh
+HTTP middleware	web/app/Http/Middleware/EnsureShopifySession.php	Refresh before request; fall back to exchange
+Middleware alias	web/app/Http/Kernel.php → shopify.auth	Register middleware
+Protected API routes	web/routes/api.php (Route::middleware(['shopify.auth']))	Embedded admin APIs
+Shop resolve + API client	web/app/Http/Controllers/HelperController.php	getShop(), getShopApi() always ensure-fresh
+Direct GraphQL clients	Controllers/Jobs calling new Graphql(...)	Must call TokenExchange::ensureFreshAccessToken($session) first
+Queue jobs	web/app/Jobs/Sync*.php, etc.	Refresh at start of handle()
+Webhooks	web/routes/api.php webhook closures	Refresh when loading shop session before Admin API use
+4. Database schema (must have)
+Add (or ensure) these columns on the shop session/token table (this app uses sessions):
+
+Column	Type	Purpose
+session_id	string	Prefer Shopify offline id: offline_{shop}.myshopify.com
+shop	string	example.myshopify.com
+access_token	text/string	Current Admin API token
+refresh_token	text (not string(255) — tokens can be long)	Current refresh token
+expires_at	datetime/nullable	When access_token expires
+refresh_token_expires_at	datetime/nullable	When refresh_token expires
+scope	string/nullable	Granted scopes
+is_online	bool	Offline sessions should be false
+Migration checklist for another project
+Schema::table('sessions', function (Blueprint $table) {
+    $table->text('refresh_token')->nullable()->after('access_token');
+    $table->timestamp('refresh_token_expires_at')->nullable()->after('refresh_token');
+    // expires_at may already exist from older Shopify templates
+});
+Persistence formula
+
+expires_at = now() + expires_in seconds
+refresh_token_expires_at = now() + refresh_token_expires_in seconds
+5. Config (production-safe)
+Do not call env('SHOPIFY_API_KEY') from controllers/services when config is cached.
+
+In config/shopify.php (or equivalent):
+
+return [
+    'api_key' => env('SHOPIFY_API_KEY', 'not_defined'),
+    'api_secret' => env('SHOPIFY_API_SECRET', 'not_defined'),
+    'scopes' => env('SCOPES', 'not_defined'),
+    'host' => str_replace('https://', '', env('HOST', 'not_defined')),
+    'api_version' => env('SHOPIFY_API_VERSION'),
+];
+Everywhere else use:
+
+config('shopify.api_key');
+config('shopify.api_secret');
+Initialize Shopify Context from the same config values in the app service provider.
+
+6. Acquiring expiring tokens
+6.1 OAuth authorization code grant (install / reauth)
+When: Merchant installs app or is sent through /api/auth.
+
+Where in this project: ExpiringOfflineOAuth::exchangeAuthorizationCode() and persistSession().
+
+Request
+
+POST https://{shop}.myshopify.com/admin/oauth/access_token
+Content-Type: application/x-www-form-urlencoded
+
+client_id=...
+client_secret=...
+code={authorization_code}
+expiring=1
+Important
+
+Shopify PHP SDK OAuth::callback() historically exchanges without expiring=1. This project therefore performs the exchange manually and passes expiring=1.
+If the expiring exchange fails, you may temporarily fall back to non-expiring for older apps — but public apps must migrate fully before Jan 1, 2027.
+Persist all of
+
+access_token
+refresh_token
+expires_at
+refresh_token_expires_at
+scope
+session_id = offline_{shop}
+is_online = false
+6.2 Token exchange (merchant has App Bridge session JWT)
+When: Embedded app is open; you have Authorization: Bearer <session_token>; offline token is missing/invalid and refresh failed or is unavailable.
+
+Where in this project: TokenExchange::exchange($shop, $sessionToken).
+
+Request
+
+POST https://{shop}.myshopify.com/admin/oauth/access_token
+Content-Type: application/x-www-form-urlencoded
+
+client_id=...
+client_secret=...
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+subject_token={session_jwt}
+subject_token_type=urn:ietf:params:oauth:token-type:id_token
+requested_token_type=urn:shopify:params:oauth:token-type:offline-access-token
+expiring=1
+Also used for migration of an existing non-expiring offline token → expiring offline token:
+
+subject_token = {old_non_expiring_offline_access_token}
+subject_token_type = urn:shopify:params:oauth:token-type:offline-access-token
+requested_token_type = urn:shopify:params:oauth:token-type:offline-access-token
+expiring=1
+That migration is irreversible for that shop (old non-expiring token is revoked).
+
+7. Refreshing tokens (the heart of the fix)
+7.1 Refresh API
+Where in this project: TokenExchange::refresh($shop).
+
+Request
+
+POST https://{shop}.myshopify.com/admin/oauth/access_token
+Content-Type: application/x-www-form-urlencoded
+
+client_id=...
+client_secret=...
+grant_type=refresh_token
+refresh_token={stored_refresh_token}
+Response (example)
+
+{
+  "access_token": "shpat_...",
+  "expires_in": 3600,
+  "refresh_token": "shprt_...",
+  "refresh_token_expires_in": 7776000,
+  "scope": "read_products,write_products"
+}
+7.2 When to refresh
+Implemented in TokenExchange::needsRefresh():
+
+Refresh when all are true:
+
+Session has access_token
+expires_at is set (expiring token)
+refresh_token exists
+refresh_token_expires_at is empty or still in the future
+Now is at/after (expires_at - REFRESH_BUFFER)
+This project uses 300 seconds (5 minutes) buffer so tokens are refreshed before hard expiry
+Do not refresh when:
+
+expires_at is null → treat as legacy non-expiring token
+no refresh_token → cannot refresh; need exchange/OAuth
+refresh_token_expires_at is past → merchant must reopen app
+7.3 Concurrency / race safety
+Multiple jobs or HTTP requests can refresh at the same time. Shopify invalidates the previous refresh token after use, so double-refresh can brick the shop until reauth.
+
+Required pattern (this project):
+
+$lock = Cache::lock("shopify_token_refresh_{$shop}", 20);
+return $lock->block(15, function () use ($shop) {
+    // Re-load session inside the lock
+    // Re-check needsRefresh() — another worker may have refreshed already
+    // Then call Shopify refresh endpoint
+    // Persist new tokens
+});
+If lock times out, re-read DB and use whatever token is there (another process likely refreshed).
+
+7.4 ensureFreshAccessToken (single entrypoint)
+Where: TokenExchange::ensureFreshAccessToken(?Session $session): ?Session
+
+Contract for every caller (HTTP, job, webhook, mail, GraphQL helper):
+
+$session = TokenExchange::ensureFreshAccessToken($session);
+// now $session->access_token is safe to use (or refresh failed / impossible)
+Responsibilities:
+
+Resolve the preferred offline session row (offline_{shop} first)
+If needs refresh → call refresh()
+Return the up-to-date session model
+This must be called before every Admin API usage path, or wrapped in your API client factory (recommended).
+
+8. HTTP request path (embedded admin app)
+8.1 Middleware: EnsureShopifySession (shopify.auth)
+Where: web/app/Http/Middleware/EnsureShopifySession.php
+Applied to: protected groups in web/routes/api.php
+
+Order of operations:
+
+Load current Shopify SDK session (offline).
+Resolve shop from query / session / Bearer JWT dest.
+Proactive refresh via TokenExchange::ensureFreshAccessToken.
+If session locally valid → optional live GraphQL shop { name } probe.
+If still not usable:
+Try TokenExchange::refresh($shop) again / fall back to DB offline session
+If merchant Bearer JWT present → TokenExchange::exchange($shop, $jwt)
+If all fail → TopLevelRedirection to /api/auth?shop=... (401 + reauthorize headers for App Bridge).
+Do not set proceed = true on every exception during the probe. Auth errors (invalid api key, 401, unauthorized) must force refresh/reauth.
+
+8.2 Helper methods used by controllers
+Where: HelperController
+
+getShop($request)
+Resolves shop in this order:
+
+shopifySession from middleware attributes
+?shop= query
+Bearer session JWT dest host
+Offline session row via TokenExchange::resolveOfflineSession($shop)
+Returns ensureFreshAccessToken($session)
+getShopApi($shop_name)
+Resolve offline session
+ensureFreshAccessToken
+Build API client with fresh access_token
+Use config('shopify.*') for key/secret/version
+Recommendation for other projects: make one API client factory (like getShopApi) and force all Admin API traffic through it so refresh cannot be skipped.
+
+8.3 Direct new Graphql($shop, $token) calls
+If any code constructs GraphQL/REST clients manually, it must refresh first:
+
+$session = \App\Lib\TokenExchange::ensureFreshAccessToken($session);
+$client = new \Shopify\Clients\Graphql($session->shop, $session->access_token);
+This project does that in:
+
+ShopifyFunctionController
+ProductController / CustomerController / ShopifyFlowController / parts of HelperController
+9. Background jobs
+Jobs often run after the access token has already expired. Merchant JWT is not available.
+
+Pattern used here
+
+public function handle()
+{
+    $this->session = \App\Lib\TokenExchange::ensureFreshAccessToken($this->session);
+    // ... Admin API work
+}
+Or when jobs store only shop domain:
+
+$session = \App\Lib\TokenExchange::ensureFreshAccessToken(
+    \App\Lib\TokenExchange::resolveOfflineSession($shop)
+);
+Jobs updated in this project include (non-exhaustive):
+
+SyncStoreProductsJob
+SyncStoreCustomersJob
+SyncStoreOrdersJob
+SyncStoreLocationsJob
+SyncStoreSegmentsJob
+SyncGraphqlCollectionsJob
+afterAppInstallationJob
+syncCollectionJob
+10. Webhooks
+Webhook handlers typically load the shop by X-Shopify-Shop-Domain.
+
+Pattern
+
+$shop_name = $request->header('x-shopify-shop-domain');
+$session = \App\Lib\TokenExchange::ensureFreshAccessToken(
+    \App\Lib\TokenExchange::resolveOfflineSession($shop_name)
+        ?: Session::where('shop', $shop_name)->first()
+);
+If the webhook only writes the incoming payload to your DB and does not call Admin API, refresh is optional. If it calls Admin API (metafields, order fetch, etc.), refresh is mandatory.
+
+Webhooks must remain outside shopify.auth middleware (Shopify cannot send App Bridge JWTs).
+
+11. Session identity
+Prefer one canonical offline row per shop:
+
+session_id = "offline_" . $shop   // e.g. offline_store.myshopify.com
+is_online  = false
+TokenExchange::resolveOfflineSession($shop):
+
+Try session_id = offline_{shop}
+Else latest row for that shop with non-null access_token
+Avoid mixing online user sessions with offline token storage when refreshing.
+
+12. End-to-end sequence diagrams
+A) Merchant opens embedded app and calls your API
+Frontend (App Bridge)
+  → Authorization: Bearer <session_jwt>
+  → POST /api/save-option-set
+
+shopify.auth middleware
+  → ensureFreshAccessToken (refresh if needed)
+  → optionally probe shop { name }
+  → if broken: refresh → else exchange(session_jwt)
+  → attach shopifySession
+
+Controller
+  → HelperController::getShop($request)   // also ensure-fresh
+  → HelperController::getShopApi($shop)   // also ensure-fresh
+  → Admin GraphQL/REST with fresh token
+B) Queue job hours later
+Job::handle()
+  → ensureFreshAccessToken(session)
+      → needsRefresh? yes
+      → Cache lock
+      → POST grant_type=refresh_token
+      → persist new access_token + refresh_token
+  → Admin API calls succeed
+C) Refresh token itself expired (90 days idle)
+ensureFreshAccessToken / refresh
+  → refresh_token_expires_at in the past OR Shopify returns invalid refresh
+  → cannot recover in background
+  → next merchant visit:
+       exchange(session_jwt) OR /api/auth OAuth
+  → new expiring offline token pair stored
+13. Implementation checklist for another project
+Copy this checklist when porting.
+
+Schema / config
+[ ] Add refresh_token (TEXT), expires_at, refresh_token_expires_at
+[ ] Put Shopify credentials in config file; read via config()
+[ ] Prefer offline session id offline_{shop}
+Acquire
+[ ] OAuth code exchange includes expiring=1
+[ ] Token exchange includes expiring=1
+[ ] Persist access + refresh + both expiries on every acquire
+Central service
+[ ] Implement needsRefresh, refresh, exchange, ensureFreshAccessToken, resolveOfflineSession
+[ ] Use cache lock around refresh
+[ ] Always overwrite stored refresh_token with the new one from Shopify
+Call sites
+[ ] Middleware refreshes before serving protected routes
+[ ] API client factory refreshes before every Admin client creation
+[ ] Every job that calls Admin API refreshes at start
+[ ] Webhooks that call Admin API refresh when loading session
+[ ] No raw access_token usage without ensure-fresh
+Routes
+[ ] Protect embedded admin APIs with session middleware
+[ ] Keep webhooks / storefront / privacy endpoints public
+Deploy
+[ ] Run migrations
+[ ] config:clear / config:cache as appropriate
+[ ] Have merchants open the app once after deploy so shops without refresh_token get exchanged/minted
+14. Common failure modes & fixes
+Symptom	Likely cause	Fix
+Invalid API key after ~1 hour	No refresh before Admin API use	Call ensureFreshAccessToken in API factory / jobs
+Refresh works in admin but jobs fail	Jobs use serialized/stale token, never refresh	Refresh at job handle() start
+Refresh suddenly invalid for shop	Concurrent double-refresh	Add per-shop cache lock; re-check after lock
+env() null in production	config:cache	Move credentials to config; use config()
+Middleware never runs	Auth middleware commented out on API routes	Wrap admin routes in shopify.auth
+No refresh_token in DB	Token acquired without expiring=1	Re-acquire with expiring=1 (exchange/OAuth)
+Works until ~90 days then dies forever in background	Refresh token expired	Merchant must reopen app for exchange/OAuth
+HMAC / OAuth callback 401	Wrong API secret / config cache	Verify Partner app secret + config bootstrap
+15. Minimal code skeleton to port
+Use this as the target shape in another Laravel (or similar) app.
+
+class TokenExchange
+{
+    public const REFRESH_BUFFER_SECONDS = 300;
+
+    public static function ensureFreshAccessToken(?YourSessionModel $session): ?YourSessionModel
+    {
+        // resolve offline session → needsRefresh? → refresh() → return fresh model
+    }
+
+    public static function needsRefresh(?YourSessionModel $session): bool
+    {
+        // expires_at set + refresh_token present + not past refresh expiry
+        // + now >= expires_at - buffer
+    }
+
+    public static function refresh(string $shop): ?array
+    {
+        // Cache::lock("shopify_token_refresh_{$shop}")
+        // POST grant_type=refresh_token
+        // persistTokenResponse()
+    }
+
+    public static function exchange(string $shop, string $sessionJwt): ?array
+    {
+        // POST token-exchange + expiring=1
+        // persistTokenResponse()
+    }
+
+    public static function resolveOfflineSession(string $shop): ?YourSessionModel
+    {
+        // offline_{shop} first
+    }
+
+    private static function persistTokenResponse(string $shop, array $data, ?YourSessionModel $row = null): void
+    {
+        // save access_token, refresh_token, expires_at, refresh_token_expires_at, scope
+    }
+}
+Wire it into:
+
+OAuth callback persistence
+Session middleware
+Admin API client factory
+Jobs / webhooks that hit Admin API
+16. Exact locations in this repository (quick navigation)
+Acquire (OAuth)
+  web/app/Lib/ExpiringOfflineOAuth.php
+  web/routes/web.php                 → /api/auth , /api/auth/callback
+
+Central refresh/exchange
+  web/app/Lib/TokenExchange.php      → ensureFresh / refresh / exchange / persist
+
+HTTP gate
+  web/app/Http/Middleware/EnsureShopifySession.php
+  web/app/Http/Kernel.php            → alias shopify.auth
+  web/routes/api.php                 → middleware group + webhook session loads
+
+Controllers / API clients
+  web/app/Http/Controllers/HelperController.php
+    → getShop(), getShopApi(), ensureFreshAccessToken()
+
+Jobs
+  web/app/Jobs/SyncStore*.php
+  web/app/Jobs/afterAppInstallationJob.php
+  web/app/Jobs/syncCollectionJob.php
+  (+ ensure-fresh before GraphQL in several controllers)
+
+Schema
+  web/database/migrations/2026_05_21_062957_add_refresh_token_to_sessions_table.php
+  web/database/migrations/2026_05_21_120000_change_refresh_token_column_to_text.php
+  web/database/migrations/2026_07_14_081900_add_refresh_token_expires_at_to_sessions_table.php
+
+Config
+  web/config/shopify.php
+  web/app/Providers/AppServiceProvider.php
+17. Prompt you can give another AI
+Paste this (and this markdown file) into another project chat:
+
+Implement Shopify expiring offline access tokens for this app using the guide in
+SHOPIFY_EXPIRING_OFFLINE_TOKENS.md (or the attached copy).
+
+Requirements:
+1. DB fields: refresh_token (text), expires_at, refresh_token_expires_at
+2. Acquire offline tokens with expiring=1 (OAuth + token exchange)
+3. Central TokenExchange service with ensureFreshAccessToken, refresh (locked),
+   exchange, persist
+4. Refresh automatically before Admin API use in: middleware, API client factory,
+   jobs, and webhooks that call Admin API
+5. Use config() for API credentials (config-cache safe)
+6. Do not leave any Admin API path using a raw stored access_token without ensure-fresh
+7. Keep webhooks/public storefront routes outside embedded session auth middleware
+
+Follow the checklist in section 13 and match the architecture in sections 2–11.
+18. Summary (one paragraph)
+Shopify now issues offline Admin API tokens that expire about every hour and include a refresh token (~90 days). This project stores both values, requests them with expiring=1 during OAuth/token exchange, and centrally refreshes via TokenExchange::ensureFreshAccessToken() before Admin API usage in middleware, getShop/getShopApi, jobs, webhooks, and direct GraphQL clients. Without that ensure-fresh step on every path, API calls eventually fail with “Invalid API key or access token”.
+

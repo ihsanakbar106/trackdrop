@@ -1,0 +1,39 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "AutoTrackDev"
+client_id = "09fcc2a5c7f2301649d79e7cf91eac6e"
+application_url = "https://last-transcript-configurations-taking.trycloudflare.com"
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products,read_customers,read_orders,write_orders,write_themes,read_themes,read_content,write_content,read_fulfillments,write_fulfillments,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_third_party_fulfillment_orders,write_third_party_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_locations,read_inventory"
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://last-transcript-configurations-taking.trycloudflare.com/auth/callback",
+  "https://last-transcript-configurations-taking.trycloudflare.com/auth/shopify/callback",
+  "https://last-transcript-configurations-taking.trycloudflare.com/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-04"
+
+  [webhooks.privacy_compliance]
+  customer_deletion_url = "https://app.theautotrack.com/api/webhooks/customers-redact"
+  customer_data_request_url = "https://app.theautotrack.com/api/webhooks/customers-data-request"
+  shop_deletion_url = "https://app.theautotrack.com/api/webhooks/shop-redact"
+
+[app_proxy]
+url = "https://last-transcript-configurations-taking.trycloudflare.com/track"
+subpath = "track"
+prefix = "a"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "elias-project.myshopify.com"
+include_config_on_deploy = true

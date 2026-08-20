@@ -1,0 +1,23 @@
+node_modules/
+web/frontend/node_modules/
+web/vendor/
+
+# Laravel cache / generated files
+web/storage/framework/cache/data/
+web/storage/framework/sessions/
+web/storage/framework/views/
+web/storage/framework/testing/
+web/storage/logs/
+
+# Secrets
+web/.env
+web/.env.testing
+
+# Archives
+*.zip
+
+# Large media (source + hashed Vite/public copies)
+*.mp4
+*.mov
+*.webm
+*.mkv
