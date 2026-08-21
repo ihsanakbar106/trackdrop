@@ -5,6 +5,7 @@ use App\Http\Controllers\SyncController;
 use App\Jobs\afterAppInstallationJob;
 use App\Lib\AuthRedirection;
 use App\Lib\EnsureBilling;
+use App\Lib\ExpiringOfflineOAuth;
 use App\Lib\ProductCreator;
 use App\Models\Fulfillment;
 use App\Models\Plan;
@@ -15,7 +16,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use Shopify\Auth\OAuth;
 use Shopify\Auth\Session as AuthSession;
 use Shopify\Clients\HttpHeaders;
 use Shopify\Clients\Rest;
@@ -303,7 +303,7 @@ Route::get('/api/auth', function (Request $request) {
 });
 
 Route::get('/api/auth/callback', function (Request $request) {
-    $session = OAuth::callback(
+    $session = ExpiringOfflineOAuth::callback(
         $request->cookie(),
         $request->query(),
         ['App\Lib\CookieHandler', 'saveShopifyCookie']

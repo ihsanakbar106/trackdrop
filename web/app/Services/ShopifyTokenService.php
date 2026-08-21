@@ -7,6 +7,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class ShopifyTokenService
@@ -57,6 +58,60 @@ class ShopifyTokenService
 
             return $this->persistExpiring($row, $response->json() ?: []);
         });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function exchangeAuthorizationCode(string $shop, string $code): array
+    {
+        $base = [
+            'client_id' => env('SHOPIFY_API_KEY'),
+            'client_secret' => env('SHOPIFY_API_SECRET'),
+            'code' => $code,
+        ];
+
+        $response = Http::asForm()->acceptJson()->post(
+            'https://' . $shop . '/admin/oauth/access_token',
+            $base + ['expiring' => '1']
+        );
+
+        if (!$response->ok()) {
+            Log::warning('Expiring OAuth exchange failed; retrying without expiring=1', [
+                'shop' => $shop,
+                'status' => $response->status(),
+                'body' => substr((string) $response->body(), 0, 300),
+            ]);
+            $response = Http::asForm()->acceptJson()->post(
+                'https://' . $shop . '/admin/oauth/access_token',
+                $base
+            );
+        }
+
+        if (!$response->ok()) {
+            throw new RuntimeException($this->httpError('oauth', $response));
+        }
+
+        $body = $response->json() ?: [];
+        if (empty($body['access_token'])) {
+            throw new RuntimeException('Shopify token oauth failed: missing access_token');
+        }
+
+        return $body;
+    }
+
+    public function persistFromAuthorizationResponse(string $sessionId, array $data): void
+    {
+        if (empty($data['refresh_token'])) {
+            return;
+        }
+
+        $session = Session::where('session_id', $sessionId)->first();
+        if (!$session) {
+            throw new RuntimeException('No session after OAuth store');
+        }
+
+        $this->persistExpiring($session, $data);
     }
 
     /**
