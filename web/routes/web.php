@@ -153,7 +153,7 @@ Route::get('/test', function (Request $request) {
             }
             $client = new Rest($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
 
-            $shop_metafield = $client->post('/admin/metafields.json', [
+            $shop_metafield = $client->post('metafields.json', [
                 "metafield" => array(
                     "key" => 'translation',
                     "value" => json_encode($translation),

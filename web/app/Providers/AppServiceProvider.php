@@ -10,7 +10,6 @@ use App\Lib\Handlers\Privacy\ShopRedact;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\URL;
 use Shopify\Context;
-use Shopify\ApiVersion;
 use Shopify\Webhooks\Registry;
 use Shopify\Webhooks\Topics;
 
@@ -43,7 +42,7 @@ class AppServiceProvider extends ServiceProvider
             env('SCOPES', 'not_defined'),
             $host,
             new DbSessionStorage(),
-            ApiVersion::LATEST,
+            '2026-07',
             true,
             false,
             null,

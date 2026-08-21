@@ -12,10 +12,33 @@ use Shopify\Clients\Graphql;
 class ProductCreator
 {
     private const CREATE_PRODUCTS_MUTATION = <<<'QUERY'
-    mutation populateProduct($input: ProductInput!) {
-        productCreate(input: $input) {
+    mutation populateProduct($product: ProductCreateInput!) {
+        productCreate(product: $product) {
             product {
                 id
+                variants(first: 1) {
+                    nodes {
+                        id
+                    }
+                }
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }
+    QUERY;
+
+    private const UPDATE_VARIANT_PRICE_MUTATION = <<<'QUERY'
+    mutation populateProductVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            productVariants {
+                id
+            }
+            userErrors {
+                field
+                message
             }
         }
     }
@@ -33,16 +56,38 @@ class ProductCreator
                 [
                     "query" => self::CREATE_PRODUCTS_MUTATION,
                     "variables" => [
-                        "input" => [
+                        "product" => [
                             "title" => self::randomTitle(),
-                            "variants" => [["price" => self::randomPrice()]],
-                        ]
-                    ]
+                        ],
+                    ],
                 ],
             );
 
             if ($response->getStatusCode() !== 200) {
                 throw new ShopifyProductCreatorException($response->getBody()->__toString(), $response);
+            }
+
+            $product = $response->getDecodedBody()['data']['productCreate']['product'] ?? null;
+            $variantId = $product['variants']['nodes'][0]['id'] ?? null;
+            if ($product && $variantId) {
+                $variantResponse = $client->query(
+                    [
+                        "query" => self::UPDATE_VARIANT_PRICE_MUTATION,
+                        "variables" => [
+                            "productId" => $product['id'],
+                            "variants" => [
+                                [
+                                    "id" => $variantId,
+                                    "price" => (string) self::randomPrice(),
+                                ],
+                            ],
+                        ],
+                    ],
+                );
+
+                if ($variantResponse->getStatusCode() !== 200) {
+                    throw new ShopifyProductCreatorException($variantResponse->getBody()->__toString(), $variantResponse);
+                }
             }
         }
     }

@@ -73,13 +73,16 @@ class ProductController extends HelperController
                                 hasOnlyDefaultVariant
                                 description
                                 isGiftCard
-                                featuredImage {
-                                    altText
-                                    id
-                                    height
-                                    width
-                                    url
-                                    originalSrc
+                                featuredMedia {
+                                    ... on MediaImage {
+                                        image {
+                                            altText
+                                            id
+                                            height
+                                            width
+                                            url
+                                        }
+                                    }
                                 }
 
                                 options {
@@ -202,7 +205,7 @@ class ProductController extends HelperController
         $product_save->product_status = $productNode['status'];
         $product_save->tags = implode(',', $productNode['tags']);
         $product_save->vendor = $productNode['vendor'];
-        $product_save->image = $productNode['featuredImage'] != null ?  $productNode['featuredImage']['url'] : null;
+        $product_save->image = data_get($productNode, 'featuredMedia.image.url');
         $product_save->options = json_encode($productNode['options']);
         $product_save->created_at = $productNode['createdAt'];
         $product_save->save();

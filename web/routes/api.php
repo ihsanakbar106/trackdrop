@@ -445,7 +445,7 @@ Route::any('/get/webhooks', function (Request $request) {
     $session = Session::where('shop', $request->shop)->first();
     if (isset($session)) {
         $client = new Rest($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
-        $webhooks = $client->get('/admin/webhooks');
+        $webhooks = $client->get('webhooks.json');
         $webhooks = $webhooks->getDecodedBody();
         return response()->json($webhooks);
     } else {

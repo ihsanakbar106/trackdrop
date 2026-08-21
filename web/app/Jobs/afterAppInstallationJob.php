@@ -114,7 +114,7 @@ class afterAppInstallationJob implements ShouldQueue
             }
             $client = new Rest($session->shop, (new ShopifyTokenService())->getValidAccessToken($session->shop));
 
-            $shop_metafield = $client->post('/admin/metafields.json', [
+            $shop_metafield = $client->post('metafields.json', [
                 "metafield" => array(
                     "key" => 'translation',
                     "value" => json_encode($translation),

@@ -218,7 +218,7 @@ class EnsureBilling
             oneTimePurchases(first: 250, sortKey: CREATED_AT, after: $endCursor) {
                 edges {
                     node {
-                        id,status,name,test,trialDays
+                        id,status,name,test
                     }
                 }
                 pageInfo {

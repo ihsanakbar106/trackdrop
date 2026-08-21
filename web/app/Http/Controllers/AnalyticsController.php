@@ -36,7 +36,7 @@ class AnalyticsController extends HelperController
                     email
                     myshopifyDomain
                     shopOwnerName
-                    billingAddress{
+                    shopAddress{
                         address1
                         address2
                         city
@@ -55,7 +55,7 @@ class AnalyticsController extends HelperController
                 $response =  $this->getShopApi($session->shop)->graph($query);
 
                 if ($response['errors'] == false) {
-                    $country_name = $response['body']['data']['shop']['billingAddress']['country'];
+                    $country_name = $response['body']['data']['shop']['shopAddress']['country'];
                     $session->country=$country_name;
                     $session->save();
                 }else{

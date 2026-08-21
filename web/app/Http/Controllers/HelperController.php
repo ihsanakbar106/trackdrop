@@ -60,7 +60,7 @@ class HelperController extends Controller
     {
         $options = new Options();
         $options->setType(true);
-        $options->setVersion(env('SHOPIFY_API_VERSION'));
+        $options->setVersion(env('SHOPIFY_API_VERSION', '2026-07'));
         $options->setApiKey(env('SHOPIFY_API_KEY'));
         $options->setApiSecret(env('SHOPIFY_API_SECRET'));
         $options->setApiPassword((new ShopifyTokenService())->getValidAccessToken($shop_name));

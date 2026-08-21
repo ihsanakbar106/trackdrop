@@ -8,10 +8,10 @@ handle = "trackdrop"
 
 [build]
 automatically_update_urls_on_dev = true
-dev_store_url = "trackauto.myshopify.com"
+dev_store_url = "payeo-2.myshopify.com"
 
 [webhooks]
-api_version = "2024-04"
+api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   uri = "https://app.theautotrack.com/api/webhooks/customers-data-request"

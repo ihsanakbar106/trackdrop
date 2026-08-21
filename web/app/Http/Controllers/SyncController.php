@@ -432,7 +432,7 @@ class SyncController extends HelperController
 
             if (is_null($order->location_id)) {
                 $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
-                $locations_response = $client->get('/admin/locations.json', []);
+                $locations_response = $client->get('locations.json', []);
                 $locations = $locations_response->getDecodedBody()['locations'] ? $locations_response->getDecodedBody()['locations'] : [];
 
                 if (!empty($locations)) {
@@ -522,7 +522,7 @@ QUERY;
     {
         try {
             $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
-            $fulfillments_orders = $client->get('/admin/orders/' . $db_order->shopify_order_id . '/fulfillment_orders');
+            $fulfillments_orders = $client->get('orders/' . $db_order->shopify_order_id . '/fulfillment_orders.json');
             $fulfillments_orders = $fulfillments_orders->getDecodedBody();
 
             if (isset($fulfillments_orders) && !empty($fulfillments_orders)) {
