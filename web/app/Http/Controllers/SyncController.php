@@ -31,6 +31,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
+use App\Services\ShopifyTokenService;
 use Mockery\Exception;
 use Shopify\Clients\Rest;
 
@@ -430,7 +431,7 @@ class SyncController extends HelperController
             ]);
 
             if (is_null($order->location_id)) {
-                $client = new Rest($shop->shop, $shop->access_token);
+                $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
                 $locations_response = $client->get('/admin/locations.json', []);
                 $locations = $locations_response->getDecodedBody()['locations'] ? $locations_response->getDecodedBody()['locations'] : [];
 
@@ -520,7 +521,7 @@ QUERY;
     public function sync_fulfillment_order_ids(Order $db_order, Session $shop)
     {
         try {
-            $client = new Rest($shop->shop, $shop->access_token);
+            $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
             $fulfillments_orders = $client->get('/admin/orders/' . $db_order->shopify_order_id . '/fulfillment_orders');
             $fulfillments_orders = $fulfillments_orders->getDecodedBody();
 

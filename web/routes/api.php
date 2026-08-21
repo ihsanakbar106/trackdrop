@@ -204,7 +204,7 @@ Route::any('test-flow', function (Request $request) {
         ]
     ];
 
-    $client = new Graphql($session->shop, $session->access_token);
+    $client = new Graphql($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
     $shopify_flow = $client->query(["query" => $query, "variables" => $variables]);
     $shopify_flow = $shopify_flow->getDecodedBody();
     dd($shopify_flow);
@@ -444,7 +444,7 @@ Route::any('/get/webhooks', function (Request $request) {
 
     $session = Session::where('shop', $request->shop)->first();
     if (isset($session)) {
-        $client = new Rest($session->shop, $session->access_token);
+        $client = new Rest($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
         $webhooks = $client->get('/admin/webhooks');
         $webhooks = $webhooks->getDecodedBody();
         return response()->json($webhooks);

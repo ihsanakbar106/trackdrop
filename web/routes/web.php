@@ -151,7 +151,7 @@ Route::get('/test', function (Request $request) {
                 $translation->is_default=1;
                 $translation->save();
             }
-            $client = new Rest($session->shop, $session->access_token);
+            $client = new Rest($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
 
             $shop_metafield = $client->post('/admin/metafields.json', [
                 "metafield" => array(
@@ -345,7 +345,7 @@ Route::get('/api/products/count', function (Request $request) {
     /** @var AuthSession */
     $session = $request->get('shopifySession'); // Provided by the shopify.auth middleware, guaranteed to be active
 
-    $client = new Rest($session->getShop(), $session->getAccessToken());
+    $client = new Rest($session->getShop(), (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->getShop()));
     $result = $client->get('products/count');
 
     return response($result->getDecodedBody());

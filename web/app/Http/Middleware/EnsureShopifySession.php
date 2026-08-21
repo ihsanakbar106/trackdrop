@@ -66,10 +66,12 @@ class EnsureShopifySession
                     (new ShopifyTokenService())->getValidAccessToken($session->getShop())
                 );
             } catch (\Throwable $e) {
-                Log::warning('Shopify token refresh in session middleware failed', [
+                Log::warning('Shopify token unavailable in session middleware', [
                     'shop' => $session->getShop(),
-                    'error' => $e->getMessage(),
+                    'type' => get_class($e),
                 ]);
+
+                return TopLevelRedirection::redirect($request, "/api/auth?shop=" . ($shop ?: $session->getShop()));
             }
 
             if (Config::get('shopify.billing.required')) {

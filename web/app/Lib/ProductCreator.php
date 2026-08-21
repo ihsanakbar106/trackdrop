@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Lib;
 
 use App\Exceptions\ShopifyProductCreatorException;
+use App\Services\ShopifyTokenService;
 use Shopify\Auth\Session;
 use Shopify\Clients\Graphql;
 
@@ -22,7 +23,10 @@ class ProductCreator
 
     public static function call(Session $session, int $count)
     {
-        $client = new Graphql($session->getShop(), $session->getAccessToken());
+        $client = new Graphql(
+            $session->getShop(),
+            (new ShopifyTokenService())->getValidAccessToken($session->getShop())
+        );
 
         for ($i = 0; $i < $count; $i++) {
             $response = $client->query(

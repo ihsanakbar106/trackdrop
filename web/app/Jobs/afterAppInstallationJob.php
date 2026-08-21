@@ -6,6 +6,7 @@ use App\Http\Controllers\CollectionController;
 use App\Http\Controllers\ProductController;
 use App\Models\Session;
 use App\Models\Translation;
+use App\Services\ShopifyTokenService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -111,7 +112,7 @@ class afterAppInstallationJob implements ShouldQueue
                 $translation->is_default = 1;
                 $translation->save();
             }
-            $client = new Rest($session->shop, $session->access_token);
+            $client = new Rest($session->shop, (new ShopifyTokenService())->getValidAccessToken($session->shop));
 
             $shop_metafield = $client->post('/admin/metafields.json', [
                 "metafield" => array(

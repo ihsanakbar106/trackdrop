@@ -80,7 +80,6 @@ class ShopifyTokenService
             Log::warning('Expiring OAuth exchange failed; retrying without expiring=1', [
                 'shop' => $shop,
                 'status' => $response->status(),
-                'body' => substr((string) $response->body(), 0, 300),
             ]);
             $response = Http::asForm()->acceptJson()->post(
                 'https://' . $shop . '/admin/oauth/access_token',
@@ -102,16 +101,18 @@ class ShopifyTokenService
 
     public function persistFromAuthorizationResponse(string $sessionId, array $data): void
     {
-        if (empty($data['refresh_token'])) {
-            return;
-        }
-
         $session = Session::where('session_id', $sessionId)->first();
         if (!$session) {
             throw new RuntimeException('No session after OAuth store');
         }
 
-        $this->persistExpiring($session, $data);
+        if (!empty($data['refresh_token'])) {
+            $this->persistExpiring($session, $data);
+
+            return;
+        }
+
+        $this->persistLegacy($session, $data);
     }
 
     /**
@@ -169,6 +170,21 @@ class ShopifyTokenService
         $row->save();
 
         return $row->access_token;
+    }
+
+    private function persistLegacy(Session $row, array $data): void
+    {
+        $access = $data['access_token'] ?? null;
+        if (!$access) {
+            throw new RuntimeException('Shopify token oauth failed: missing access_token');
+        }
+
+        $row->access_token = $access;
+        $row->refresh_token = null;
+        $row->access_token_expires_at = null;
+        $row->refresh_token_expires_at = null;
+        $row->token_kind = 'legacy';
+        $row->save();
     }
 
     private function httpError(string $action, $response): string
