@@ -1,0 +1,1 @@
+{"version":1,"defects":[],"times":{"Tests\\Unit\\ShopifyTokenServiceTest::test_legacy_rows_never_need_refresh":0.006,"Tests\\Unit\\ShopifyTokenServiceTest::test_expiring_token_respects_leeway":0.017}}
