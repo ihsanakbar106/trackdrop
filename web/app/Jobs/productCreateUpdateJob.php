@@ -58,6 +58,7 @@ class productCreateUpdateJob implements ShouldQueue
                                 createdAt
                                 hasOnlyDefaultVariant
                                 description
+                                isGiftCard
                                 featuredMedia {
                                     ... on MediaImage {
                                         image {

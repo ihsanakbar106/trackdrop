@@ -169,10 +169,9 @@ Route::middleware(['shopify.auth'])->group(function () {
     });
 
     Route::get('update-carrier/{shopify_order_id}', function ($shopify_order_id) {
-        $cnt=new SyncController();
-        $cnt->updateCarrier($shopify_order_id);
+        $cnt = new SyncController();
 
-        return response()->json(['status' => 'error']);
+        return $cnt->updateCarrier($shopify_order_id);
     });
 });
 

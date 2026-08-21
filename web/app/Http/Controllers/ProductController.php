@@ -156,7 +156,6 @@ class ProductController extends HelperController
                 if ($response['body']['data']['products']['edges']) {
                     $products = $response['body']['data']['products']['edges'];
                     foreach ($products as $productData) {
-                    dd($productData);
                         $response = $this->CreateUpdateProduct($productData, $session);
                     }
                 }
@@ -197,7 +196,7 @@ class ProductController extends HelperController
         $product_save->shopify_product_id = $numericPId;
         $product_save->shopify_variant_id = $numeric_variantId;
         $product_save->session_id = $shop->id;
-        $product_save->is_gifted = $productNode['isGiftCard'] == true ? 1 : 0;
+        $product_save->is_gifted = data_get($productNode, 'isGiftCard') == true ? 1 : 0;
         $product_save->body_html = $productNode['description'];
         $product_save->title = $productNode['title'];
         $product_save->product_type = $productNode['productType'];

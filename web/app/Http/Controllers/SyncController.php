@@ -905,36 +905,49 @@ QUERY;
 
     public function updateCarrier($shopify_order_id){
         $order = Order::where('shopify_order_id', $shopify_order_id)->first();
+        if (!$order) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Order not found.',
+            ]);
+        }
+
         $shop = Session::find($order->session_id);
+        $fulfillments = $order->fulfillments()->whereNotNull('tracking_number')
+            ->whereNotNull('tracking_company')->get();
 
-        $fulfillments = null;
-        if (isset($order)) {
-            $fulfillments = $order->fulfillments()->whereNotNull('tracking_number')
-                ->whereNotNull('tracking_company')->get();
-            if ($fulfillments->count()) {
-                $fulfillment_controller = new \App\Http\Controllers\FulfillmentController();
-                foreach ($fulfillments as $fulfillment) {
-                    $shipping_status = $fulfillment_controller->shipping_status(
-                        $fulfillment->fulfillment_id,
-                        $fulfillment->tracking_number,
-                        $fulfillment->tracking_company,
-                        $shop
-                    );
+        if (!$fulfillments->count()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No tracking number to refresh.',
+            ]);
+        }
 
-                    if (isset($shipping_status) && isset($shipping_status->data) && !empty($shipping_status->data)) {
-                        if ($shipping_status != false) {
-                            $fulfillment_controller->shippingStatusUpdate($shipping_status,$fulfillment);
+        $fulfillment_controller = new \App\Http\Controllers\FulfillmentController();
+        foreach ($fulfillments as $fulfillment) {
+            $shipping_status = $fulfillment_controller->shipping_status(
+                $fulfillment->fulfillment_id,
+                $fulfillment->tracking_number,
+                $fulfillment->tracking_company,
+                $shop
+            );
 
-                            $data = [
-                                'status' => 'success',
-                                'message' => 'Successfully Synced!',
-                            ];
-                            return response()->json($data);
-                        }
-                    }
+            if (isset($shipping_status) && isset($shipping_status->data) && !empty($shipping_status->data)) {
+                if ($shipping_status != false) {
+                    $fulfillment_controller->shippingStatusUpdate($shipping_status,$fulfillment);
+
+                    return response()->json([
+                        'status' => 'success',
+                        'message' => 'Successfully refreshed!',
+                    ]);
                 }
             }
         }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'No tracking updates found.',
+        ]);
     }
     public function UpdateStoreOrderTrackings($shop, $datefilter)
     {
