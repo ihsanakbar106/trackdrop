@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-class AddNfInFulfillmentsTable extends Migration
+class ChangeSessionsScopeToText extends Migration
 {
     /**
      * Run the migrations.
@@ -13,8 +13,8 @@ class AddNfInFulfillmentsTable extends Migration
      */
     public function up()
     {
-        Schema::table('fulfillments', function (Blueprint $table) {
-            $table->boolean('enable_tracking')->default(0)->nullable();
+        Schema::table('sessions', function (Blueprint $table) {
+            $table->text('scope')->nullable()->change();
         });
     }
 
@@ -25,8 +25,8 @@ class AddNfInFulfillmentsTable extends Migration
      */
     public function down()
     {
-        Schema::table('fulfillments', function (Blueprint $table) {
-            //
+        Schema::table('sessions', function (Blueprint $table) {
+            $table->string('scope')->nullable()->change();
         });
     }
 }

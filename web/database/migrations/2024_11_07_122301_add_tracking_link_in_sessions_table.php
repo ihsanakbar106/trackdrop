@@ -14,7 +14,7 @@ class AddTrackingLinkInSessionsTable extends Migration
     public function up()
     {
         Schema::table('sessions', function (Blueprint $table) {
-            $table->boolean('tracking_link')->default(false)->nullable();
+            $table->boolean('tracking_link')->default(0)->nullable();
         });
     }
 

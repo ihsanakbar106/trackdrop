@@ -17,7 +17,7 @@ class CreateTranslationsTable extends Migration
             $table->id();
             $table->bigInteger('shop_id')->nullable();
             $table->string('language')->default('English')->nullable();
-            $table->boolean('is_default')->default('false')->nullable();
+            $table->boolean('is_default')->default(0)->nullable();
             $table->string('track_your_order')->default('TRACK YOUR ORDER')->nullable();
             $table->string('order_number')->default('Order number')->nullable();
             $table->string('tracking_number')->default('Tracking number')->nullable();
