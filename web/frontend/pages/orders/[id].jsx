@@ -209,10 +209,16 @@ export default function DetailsShipment() {
         },
       });
       setToggleLoadData(true);
-      setSuccessToast(true);
-      setToastMsg(response?.data?.message);
+      setToastMsg(response?.data?.message || "Tracking refreshed.");
+      if (response?.data?.status === "success") {
+        setSuccessToast(true);
+      } else {
+        setErrorToast(true);
+      }
     } catch (error) {
       setBtnLoading(false);
+      setErrorToast(true);
+      setToastMsg(error?.response?.data?.message || "Failed to refresh tracking.");
     }
   };
 

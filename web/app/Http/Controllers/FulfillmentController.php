@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
+use App\Services\ShopifyTokenService;
 use Mockery\Exception;
 use Shopify\Clients\Graphql;
 use Shopify\Clients\Rest;
@@ -1644,7 +1645,7 @@ class FulfillmentController extends HelperController
                 ]
             ];
 
-            $client = new Graphql($session->shop, $session->access_token);
+            $client = new Graphql($session->shop, (new ShopifyTokenService())->getValidAccessToken($session->shop));
             $shopify_flow = $client->query(["query" => $query, "variables" => $variables]);
             $shopify_flow = $shopify_flow->getDecodedBody();
         }
@@ -1660,7 +1661,7 @@ class FulfillmentController extends HelperController
         }
         try {
             $shop = Session::where('shop', $shop_name)->latest()->first();
-            $client = new Rest($shop->shop, $shop->access_token);
+            $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
             $data = [
                 "usage_charge" => [
                     'description' => "You had been charged $".$plan->usage_charges."/shipping.",
@@ -1988,7 +1989,7 @@ class FulfillmentController extends HelperController
 
 // 2022-10 fulfillment api
 
-//$client = new Rest($shop->shop, $shop->access_token);
+// 2022-10 fulfillment api (token must come from ShopifyTokenService / getShopApi)
 //$fulfillments_orders = $client->get('orders/' . $order->shopify_order_id . '/fulfillment_orders');
 //$fulfillments_orders = $fulfillments_orders->getDecodedBody();
 //foreach ($fulfillments_orders as $fulfillments_order_array) {

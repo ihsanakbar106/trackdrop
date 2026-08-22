@@ -5,6 +5,7 @@ use App\Http\Controllers\SyncController;
 use App\Jobs\afterAppInstallationJob;
 use App\Lib\AuthRedirection;
 use App\Lib\EnsureBilling;
+use App\Lib\ExpiringOfflineOAuth;
 use App\Lib\ProductCreator;
 use App\Models\Fulfillment;
 use App\Models\Plan;
@@ -15,7 +16,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use Shopify\Auth\OAuth;
 use Shopify\Auth\Session as AuthSession;
 use Shopify\Clients\HttpHeaders;
 use Shopify\Clients\Rest;
@@ -151,9 +151,9 @@ Route::get('/test', function (Request $request) {
                 $translation->is_default=1;
                 $translation->save();
             }
-            $client = new Rest($session->shop, $session->access_token);
+            $client = new Rest($session->shop, (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->shop));
 
-            $shop_metafield = $client->post('/admin/metafields.json', [
+            $shop_metafield = $client->post('metafields.json', [
                 "metafield" => array(
                     "key" => 'translation',
                     "value" => json_encode($translation),
@@ -303,7 +303,7 @@ Route::get('/api/auth', function (Request $request) {
 });
 
 Route::get('/api/auth/callback', function (Request $request) {
-    $session = OAuth::callback(
+    $session = ExpiringOfflineOAuth::callback(
         $request->cookie(),
         $request->query(),
         ['App\Lib\CookieHandler', 'saveShopifyCookie']
@@ -345,7 +345,7 @@ Route::get('/api/products/count', function (Request $request) {
     /** @var AuthSession */
     $session = $request->get('shopifySession'); // Provided by the shopify.auth middleware, guaranteed to be active
 
-    $client = new Rest($session->getShop(), $session->getAccessToken());
+    $client = new Rest($session->getShop(), (new \App\Services\ShopifyTokenService())->getValidAccessToken($session->getShop()));
     $result = $client->get('products/count');
 
     return response($result->getDecodedBody());

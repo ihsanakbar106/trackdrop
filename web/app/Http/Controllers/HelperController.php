@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Session;
+use App\Services\ShopifyTokenService;
 use Gnikyt\BasicShopifyAPI\BasicShopifyAPI;
 use Gnikyt\BasicShopifyAPI\Options;
 use Illuminate\Http\Request;
@@ -57,18 +58,15 @@ class HelperController extends Controller
     }
     public function getShopApi($shop_name)
     {
-        $session = Session::where('shop',$shop_name)->first();
-        // Create options for the API
         $options = new Options();
         $options->setType(true);
-        $options->setVersion(env('SHOPIFY_API_VERSION'));
+        $options->setVersion(env('SHOPIFY_API_VERSION', '2026-07'));
         $options->setApiKey(env('SHOPIFY_API_KEY'));
         $options->setApiSecret(env('SHOPIFY_API_SECRET'));
-        $options->setApiPassword($session->access_token);
+        $options->setApiPassword((new ShopifyTokenService())->getValidAccessToken($shop_name));
 
-        // Create the client and session
         $api = new BasicShopifyAPI($options);
-        $api->setSession(new \Gnikyt\BasicShopifyAPI\Session($session->shop));
+        $api->setSession(new \Gnikyt\BasicShopifyAPI\Session($shop_name));
 
         return $api;
     }

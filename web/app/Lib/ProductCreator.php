@@ -5,16 +5,40 @@ declare(strict_types=1);
 namespace App\Lib;
 
 use App\Exceptions\ShopifyProductCreatorException;
+use App\Services\ShopifyTokenService;
 use Shopify\Auth\Session;
 use Shopify\Clients\Graphql;
 
 class ProductCreator
 {
     private const CREATE_PRODUCTS_MUTATION = <<<'QUERY'
-    mutation populateProduct($input: ProductInput!) {
-        productCreate(input: $input) {
+    mutation populateProduct($product: ProductCreateInput!) {
+        productCreate(product: $product) {
             product {
                 id
+                variants(first: 1) {
+                    nodes {
+                        id
+                    }
+                }
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }
+    QUERY;
+
+    private const UPDATE_VARIANT_PRICE_MUTATION = <<<'QUERY'
+    mutation populateProductVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            productVariants {
+                id
+            }
+            userErrors {
+                field
+                message
             }
         }
     }
@@ -22,23 +46,48 @@ class ProductCreator
 
     public static function call(Session $session, int $count)
     {
-        $client = new Graphql($session->getShop(), $session->getAccessToken());
+        $client = new Graphql(
+            $session->getShop(),
+            (new ShopifyTokenService())->getValidAccessToken($session->getShop())
+        );
 
         for ($i = 0; $i < $count; $i++) {
             $response = $client->query(
                 [
                     "query" => self::CREATE_PRODUCTS_MUTATION,
                     "variables" => [
-                        "input" => [
+                        "product" => [
                             "title" => self::randomTitle(),
-                            "variants" => [["price" => self::randomPrice()]],
-                        ]
-                    ]
+                        ],
+                    ],
                 ],
             );
 
             if ($response->getStatusCode() !== 200) {
                 throw new ShopifyProductCreatorException($response->getBody()->__toString(), $response);
+            }
+
+            $product = $response->getDecodedBody()['data']['productCreate']['product'] ?? null;
+            $variantId = $product['variants']['nodes'][0]['id'] ?? null;
+            if ($product && $variantId) {
+                $variantResponse = $client->query(
+                    [
+                        "query" => self::UPDATE_VARIANT_PRICE_MUTATION,
+                        "variables" => [
+                            "productId" => $product['id'],
+                            "variants" => [
+                                [
+                                    "id" => $variantId,
+                                    "price" => (string) self::randomPrice(),
+                                ],
+                            ],
+                        ],
+                    ],
+                );
+
+                if ($variantResponse->getStatusCode() !== 200) {
+                    throw new ShopifyProductCreatorException($variantResponse->getBody()->__toString(), $variantResponse);
+                }
             }
         }
     }

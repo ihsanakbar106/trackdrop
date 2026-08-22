@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Translation;
+use App\Services\ShopifyTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Shopify\Clients\Rest;
@@ -45,19 +46,6 @@ class SettingController extends HelperController
         $session->dropshipping_mode=$request->dropshipping_mode;
         $session->dropshipping_keyword=$request->dropshipping_keyword;
         $session->save();
-        /*$translation = Translation::updateOrCreate(['shop_id'=>$session->id],$request->translation);
-        $client = new Rest($session->shop, $session->access_token);
-
-        $shop_metafield = $client->post('/admin/metafields.json', [
-            "metafield" => array(
-                "key" => 'translation',
-                "value" => json_encode($translation),
-                "type" => "json_string",
-                "namespace" => "autotrack"
-            )
-        ]);*/
-//        $response = $shop_metafield->getDecodedBody();
-//        dd($response);
         $data = [
             'status' => 'success',
             'message' => 'Successfully saved!',
@@ -75,9 +63,9 @@ class SettingController extends HelperController
             $updatedTranslation['is_default'] = 1;  // Set is_default to 1
             $translation->update($updatedTranslation);
         }
-        $client = new Rest($session->shop, $session->access_token);
+        $client = new Rest($session->shop, (new ShopifyTokenService())->getValidAccessToken($session->shop));
 
-        $shop_metafield = $client->post('/admin/metafields.json', [
+        $shop_metafield = $client->post('metafields.json', [
             "metafield" => array(
                 "key" => 'translation',
                 "value" => json_encode($translation),

@@ -6,6 +6,7 @@ namespace App\Lib;
 
 use App\Exceptions\ShopifyBillingException;
 use App\Models\ErrorMessage;
+use App\Services\ShopifyTokenService;
 use Illuminate\Support\Facades\Log;
 use Shopify\Auth\Session;
 use Shopify\Clients\Graphql;
@@ -186,7 +187,10 @@ class EnsureBilling
      */
     private static function queryOrException(Session $session, $query): array
     {
-        $client = new Graphql($session->getShop(), $session->getAccessToken());
+        $client = new Graphql(
+            $session->getShop(),
+            (new ShopifyTokenService())->getValidAccessToken($session->getShop())
+        );
 
         $response = $client->query($query);
         $responseBody = $response->getDecodedBody();
@@ -214,7 +218,7 @@ class EnsureBilling
             oneTimePurchases(first: 250, sortKey: CREATED_AT, after: $endCursor) {
                 edges {
                     node {
-                        id,status,name,test,trialDays
+                        id,status,name,test
                     }
                 }
                 pageInfo {

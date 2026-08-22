@@ -83,5 +83,5 @@ class Session extends Model
 {
     use HasFactory;
 
-
+    protected $hidden = ['access_token', 'refresh_token'];
 }

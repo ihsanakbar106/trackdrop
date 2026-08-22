@@ -14,7 +14,7 @@ class AddTrackingUrlUpdateInFulfillmentsTable extends Migration
     public function up()
     {
         Schema::table('fulfillments', function (Blueprint $table) {
-            $table->boolean('update_tracking_url')->after('tracking_url')->default(false)->nullable();
+            $table->boolean('update_tracking_url')->after('tracking_url')->default(0)->nullable();
         });
     }
 

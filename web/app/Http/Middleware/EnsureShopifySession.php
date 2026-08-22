@@ -6,10 +6,12 @@ use App\Exceptions\ShopifyBillingException;
 use App\Lib\AuthRedirection;
 use App\Lib\EnsureBilling;
 use App\Lib\TopLevelRedirection;
+use App\Services\ShopifyTokenService;
 use Closure;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 use Shopify\Clients\Graphql;
 use Shopify\Context;
 use Shopify\Utils;
@@ -59,6 +61,19 @@ class EnsureShopifySession
         }
 
         if ($session && $session->isValid()) {
+            try {
+                $session->setAccessToken(
+                    (new ShopifyTokenService())->getValidAccessToken($session->getShop())
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Shopify token unavailable in session middleware', [
+                    'shop' => $session->getShop(),
+                    'type' => get_class($e),
+                ]);
+
+                return TopLevelRedirection::redirect($request, "/api/auth?shop=" . ($shop ?: $session->getShop()));
+            }
+
             if (Config::get('shopify.billing.required')) {
                 // The request to check billing status serves to validate that the access token is still valid.
                 try {

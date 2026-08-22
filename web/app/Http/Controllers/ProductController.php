@@ -73,13 +73,16 @@ class ProductController extends HelperController
                                 hasOnlyDefaultVariant
                                 description
                                 isGiftCard
-                                featuredImage {
-                                    altText
-                                    id
-                                    height
-                                    width
-                                    url
-                                    originalSrc
+                                featuredMedia {
+                                    ... on MediaImage {
+                                        image {
+                                            altText
+                                            id
+                                            height
+                                            width
+                                            url
+                                        }
+                                    }
                                 }
 
                                 options {
@@ -153,7 +156,6 @@ class ProductController extends HelperController
                 if ($response['body']['data']['products']['edges']) {
                     $products = $response['body']['data']['products']['edges'];
                     foreach ($products as $productData) {
-                    dd($productData);
                         $response = $this->CreateUpdateProduct($productData, $session);
                     }
                 }
@@ -194,7 +196,7 @@ class ProductController extends HelperController
         $product_save->shopify_product_id = $numericPId;
         $product_save->shopify_variant_id = $numeric_variantId;
         $product_save->session_id = $shop->id;
-        $product_save->is_gifted = $productNode['isGiftCard'] == true ? 1 : 0;
+        $product_save->is_gifted = data_get($productNode, 'isGiftCard') == true ? 1 : 0;
         $product_save->body_html = $productNode['description'];
         $product_save->title = $productNode['title'];
         $product_save->product_type = $productNode['productType'];
@@ -202,7 +204,7 @@ class ProductController extends HelperController
         $product_save->product_status = $productNode['status'];
         $product_save->tags = implode(',', $productNode['tags']);
         $product_save->vendor = $productNode['vendor'];
-        $product_save->image = $productNode['featuredImage'] != null ?  $productNode['featuredImage']['url'] : null;
+        $product_save->image = data_get($productNode, 'featuredMedia.image.url');
         $product_save->options = json_encode($productNode['options']);
         $product_save->created_at = $productNode['createdAt'];
         $product_save->save();

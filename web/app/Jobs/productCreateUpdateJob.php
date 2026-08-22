@@ -58,13 +58,17 @@ class productCreateUpdateJob implements ShouldQueue
                                 createdAt
                                 hasOnlyDefaultVariant
                                 description
-                                featuredImage {
-                                    altText
-                                    id
-                                    height
-                                    width
-                                    url
-                                    originalSrc
+                                isGiftCard
+                                featuredMedia {
+                                    ... on MediaImage {
+                                        image {
+                                            altText
+                                            id
+                                            height
+                                            width
+                                            url
+                                        }
+                                    }
                                 }
 
                                 options {
