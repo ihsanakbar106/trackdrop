@@ -36,13 +36,8 @@ class MigrateExpiringShopifyTokens extends Command
             return 1;
         }
 
-        $envKey = (string) env('SHOPIFY_API_KEY');
-        $tomlKey = $this->tomlClientId();
         $this->line("shop={$session->shop} id={$session->id} token_kind=" . ($session->token_kind ?? 'legacy') . ' has_refresh=' . ($session->refresh_token ? 'yes' : 'no') . ' token_len=' . strlen((string) $session->access_token));
-        $this->line("artisan client_id={$envKey}");
-        if ($tomlKey) {
-            $this->line("toml client_id={$tomlKey}");
-        }
+        $this->line('artisan client_id=' . env('SHOPIFY_API_KEY'));
 
         $already = $session->refresh_token && ($session->token_kind ?? '') === 'expiring';
         if ($this->option('dry-run')) {
@@ -55,14 +50,6 @@ class MigrateExpiringShopifyTokens extends Command
             $this->info('Already expiring. Nothing to do.');
 
             return 0;
-        }
-
-        if ($tomlKey && $envKey !== $tomlKey) {
-            $this->error('Refusing to call Shopify: web/.env SHOPIFY_API_KEY is not the local CLI app.');
-            $this->line('shopify app dev / shopify.app.toml = AutoTrackDev. php artisan is using a different key, so Shopify returns invalid_subject_token.');
-            $this->line('Fix: from the project root run `shopify app env show`, copy SHOPIFY_API_KEY and SHOPIFY_API_SECRET into web/.env, then re-run this command.');
-
-            return 1;
         }
 
         $this->warn('Shopify will revoke the current non-expiring token if this succeeds.');
@@ -79,19 +66,6 @@ class MigrateExpiringShopifyTokens extends Command
         $this->info('OK. Stored expiring access_token + refresh_token.');
 
         return 0;
-    }
-
-    private function tomlClientId(): ?string
-    {
-        $path = dirname(base_path()) . DIRECTORY_SEPARATOR . 'shopify.app.toml';
-        if (!is_file($path)) {
-            return null;
-        }
-        if (!preg_match('/^client_id\s*=\s*"([^"]+)"/m', file_get_contents($path), $m)) {
-            return null;
-        }
-
-        return $m[1];
     }
 
     private function normalizeShop(string $shop): string
