@@ -31,6 +31,7 @@ class MigrateExpiringShopifyTokens extends Command
         $this->newLine();
 
         $migrated = 0;
+        $pending = 0;
         $skipped = 0;
         $failed = 0;
         $tokens = new ShopifyTokenService();
@@ -46,7 +47,7 @@ class MigrateExpiringShopifyTokens extends Command
             }
 
             if ($dryRun) {
-                $skipped++;
+                $pending++;
                 $this->info('  Would call Shopify token exchange (expiring=1).');
                 continue;
             }
@@ -57,6 +58,11 @@ class MigrateExpiringShopifyTokens extends Command
                 $migrated++;
                 $this->info('  OK. Stored expiring access_token + refresh_token.');
             } catch (\Throwable $e) {
+                if ($this->isUnavailableShop($e)) {
+                    $skipped++;
+                    $this->warn('  SKIP unavailable shop (closed/frozen). Token left unchanged.');
+                    continue;
+                }
                 $failed++;
                 $this->error('  FAILED ' . $e->getMessage());
                 $this->warn('  HTTP/exchange failures leave the current access_token in place. Persist failures after a 200 need a reinstall.');
@@ -64,7 +70,7 @@ class MigrateExpiringShopifyTokens extends Command
         }
 
         $this->newLine();
-        $this->info("migrated={$migrated} skipped={$skipped} failed={$failed}");
+        $this->info("migrated={$migrated} pending={$pending} skipped={$skipped} failed={$failed}");
 
         return $failed > 0 ? 1 : 0;
     }
@@ -106,5 +112,10 @@ class MigrateExpiringShopifyTokens extends Command
         }
 
         return $shop;
+    }
+
+    private function isUnavailableShop(\Throwable $e): bool
+    {
+        return strpos($e->getMessage(), 'Unavailable Shop') !== false;
     }
 }
