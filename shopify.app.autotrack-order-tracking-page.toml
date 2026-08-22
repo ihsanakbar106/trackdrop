@@ -1,0 +1,46 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "07b83a199eaf4faeac1a747cffb5b99e"
+application_url = "https://app.theautotrack.com/"
+embedded = true
+name = "AutoTrack: Order Tracking Page"
+handle = "autotrack"
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/customers-data-request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/customers-redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/shop-redact"
+  compliance_topics = [ "shop/redact" ]
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_assigned_fulfillment_orders,read_content,read_customers,read_fulfillments,read_inventory,read_locations,read_merchant_managed_fulfillment_orders,read_orders,read_products,read_themes,read_third_party_fulfillment_orders,write_assigned_fulfillment_orders,write_content,write_fulfillments,write_merchant_managed_fulfillment_orders,write_orders,write_products,write_themes,write_third_party_fulfillment_orders"
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://app.theautotrack.com/auth/callback",
+  "https://app.theautotrack.com/auth/shopify/callback",
+  "https://app.theautotrack.com/api/auth/callback",
+  "https://app.theautotrack.com/.shopify/graphiql/auth/callback"
+]
+
+[app_proxy]
+url = "https://app.theautotrack.com/track"
+subpath = "track"
+prefix = "a"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = false
