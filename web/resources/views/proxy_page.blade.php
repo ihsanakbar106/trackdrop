@@ -47,7 +47,7 @@
         document.body.appendChild(style);
         // Create the iframe element
 
-        var iframeSrc = `https://app.theautotrack.com/track?shop=${shopName}`;
+        var iframeSrc = `{{ app_public_url() }}/track?shop=${shopName}`;
 
         // Check if trackingNumber has a value and append it to the iframe src
         if (trackingNumber) {
@@ -83,7 +83,7 @@
 
     // Function to adjust the iframe height
     function adjustIframeHeight(event) {
-        if (event.data.type === 'resizeIframe' && (event.origin === 'https://phpstack-1329250-4863091.cloudwaysapps.com'|| event.origin === 'https://app.theautotrack.com')) {
+        if (event.data.type === 'resizeIframe' && (event.origin === @json(app_public_url()) || event.origin === 'https://phpstack-1329250-4863091.cloudwaysapps.com'|| event.origin === 'https://app.theautotrack.com')) {
             var iframe = document.getElementById('track-drop');
             iframe.style.height = event.data.height + 'px';
         }

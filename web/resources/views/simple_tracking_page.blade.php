@@ -1170,7 +1170,7 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const appUrl="https://track-drop.test";
+        const appUrl=@json(app_public_url());
         const shop_name='elias-project.myshopify.com';
         // const shop_name=Shopify.shop;
         // const appUrl="https://app.theautotrack.com";

@@ -1177,8 +1177,7 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const shop_name=Shopify.shop;
-        const appUrl="https://app.theautotrack.com";
-        // const appUrl="https://track-drop.test";
+        const appUrl=@json(app_public_url());
         // const shop_name='elias-project.myshopify.com';
         const tabs = document.querySelectorAll('.tf_tracking_form_tab');
         const orderForm = document.querySelector('.tf_tracking_form_order_tabs');

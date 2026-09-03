@@ -204,12 +204,12 @@ Route::get('/track', function (Request $request) {
             $data = json_decode($trackingPage->data,false);
             $title=$trackingPage->name;
             if($data){
-                $pageData=$data->pageData;
+                $pageData=$data->pageData ?? null;
                 if(isset($pageData->custom_css)){
                     $custom_css=$pageData->custom_css;
                 }
                 array_push($storeLocations,[
-                    'name' => $pageData->store_name,
+                    'name' => $pageData?->store_name ?? ($shop->shop ?? $shop_name),
                     'lat' => 40.7128,
                     'lng' => -74.0060,
                 ]);
@@ -235,9 +235,9 @@ Route::get('/api/track', function (Request $request) {
             $shop_name=$request['shop'];
             $storeLocations=[];
             if($data){
-
+                $pageData = $data->pageData ?? null;
                 array_push($storeLocations,[
-                    'name' => $data->pageData->store_name,
+                    'name' => $pageData?->store_name ?? ($shop->shop ?? $shop_name),
                     'lat' => 40.7128,
                     'lng' => -74.0060,
                 ]);

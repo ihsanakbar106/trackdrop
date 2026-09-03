@@ -20,3 +20,30 @@ if (!function_exists('generateSlug')) {
         return $string;
     }
 }
+
+if (!function_exists('app_public_url')) {
+    /**
+     * Public app origin for tracking-page JS.
+     * Local: Shopify CLI HOST (tunnel). Production: APP_URL. No env swap on deploy.
+     */
+    function app_public_url()
+    {
+        if (env('APP_ENV') === 'local') {
+            $raw = env('HOST') ?: env('APP_URL') ?: (request()->getSchemeAndHttpHost() ?? 'http://127.0.0.1');
+        } else {
+            $raw = env('APP_URL') ?: env('HOST');
+        }
+
+        $raw = rtrim((string) $raw, '/');
+        if ($raw === '') {
+            return 'https://app.theautotrack.com';
+        }
+
+        if (!preg_match('#^https?://#i', $raw)) {
+            $isLocalHost = in_array(strtolower(explode(':', $raw)[0]), ['127.0.0.1', 'localhost'], true);
+            $raw = ($isLocalHost ? 'http://' : 'https://') . $raw;
+        }
+
+        return $raw;
+    }
+}

@@ -38,6 +38,7 @@ import {
   ViewIcon,
   XSmallIcon,
   ProductIcon,
+  NoteIcon,
 } from "@shopify/polaris-icons";
 import { useNavigate } from "react-router-dom";
 import { AppContext } from "../../../components";
@@ -90,7 +91,7 @@ export default function Modern() {
   const [errors, setErrors] = useState({
     go_to_store_link: "",
     second_link_icon: "",
-    // other error states if needed
+    store_name: "",
   });
   const [file, setFile] = useState();
   const [secondIcon, setSecondIcon] = useState();
@@ -317,6 +318,12 @@ export default function Modern() {
   };
 
   const handleChangeValue = useCallback((field, value) => {
+    if (field === "store_name") {
+      setErrors((prevErrors) => ({
+        ...prevErrors,
+        store_name: "",
+      }));
+    }
     if (field === "go_to_store_link") {
       // Validate URL if field is go_to_store_link
       const isValidURL = validateURL(value);
@@ -461,6 +468,15 @@ export default function Modern() {
   };
 
   const handleAddPage = async (btnLoading) => {
+    if (trackingPageType === "Modern" && !String(data?.store_name || "").trim()) {
+      setErrors((prevErrors) => ({
+        ...prevErrors,
+        store_name: "Store name is required",
+      }));
+      setToastMsg("Store name is required");
+      setErrorToast(true);
+      return;
+    }
     setBtnLoading((prev) => {
       let toggleId;
       if (prev[btnLoading]) {
@@ -503,6 +519,8 @@ export default function Modern() {
       }, 1500);
     } catch (error) {
       setBtnLoading(false);
+      setToastMsg(error?.response?.data?.message || "Something went wrong");
+      setErrorToast(true);
     }
   };
 
@@ -648,7 +666,7 @@ export default function Modern() {
                     <div className="product-list-item-product-title" onClick={() => handleHiddenProductSelect(product.shopify_product_id)}>
                       <div className="product-list-item-product-title-inner">
                         <div className="product-list-item-product-title-thumbnail">
-                          <Thumbnail source={product?.image} size="small" />
+                          <Thumbnail source={product?.image || ProductIcon} size="small" />
                         </div>
                         <div className="product-list-item-product-title-text">
                           <div className="ExJYf">
@@ -742,7 +760,7 @@ export default function Modern() {
                     <div className="product-list-item-product-title" onClick={() => handleCollectionSelect(collection?.shopify_collection_id)}>
                       <div className="product-list-item-product-title-inner">
                         <div className="product-list-item-product-title-thumbnail">
-                          <Thumbnail source={collection?.image || ""} size="small" />
+                          <Thumbnail source={collection?.image || CollectionIcon} size="small" />
                         </div>
                         <div className="product-list-item-product-title-text">
                           <div className="ExJYf">
@@ -824,7 +842,7 @@ export default function Modern() {
                     <div className="product-list-item-product-title" onClick={() => handleManualProductSelect(product.shopify_product_id)}>
                       <div className="product-list-item-product-title-inner">
                         <div className="product-list-item-product-title-thumbnail">
-                          <Thumbnail source={product?.image} size="small" />
+                          <Thumbnail source={product?.image || ProductIcon} size="small" />
                         </div>
                         <div className="product-list-item-product-title-text">
                           <div className="ExJYf">
@@ -945,6 +963,7 @@ export default function Modern() {
                           placeholder="Enter your store or brand name"
                           helpText="Name of your store visible to your customers"
                           autoComplete="off"
+                          error={errors?.store_name}
                       />
                       :
                       <TextField
@@ -1712,7 +1731,7 @@ const FreeUpsellmanualProducts = ({ handleChangesOpenManualProductModal, selecte
                       <LegacyStack alignment="center" wrap={false}>
                         <LegacyStack.Item>
                           <div>
-                            <Thumbnail source={data?.image} size="small" />
+                            <Thumbnail source={data?.image || ProductIcon} size="small" />
                           </div>
                         </LegacyStack.Item>
                         <LegacyStack.Item fill>

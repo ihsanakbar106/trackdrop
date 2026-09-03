@@ -1142,7 +1142,7 @@
 </div>
 <script>
     const  shopdomain="{{$shop_name}}";
-    const appUrl="{{env('APP_URL')}}";
+    const appUrl=@json(app_public_url());
     function product_recommendations_function(handle) {
 
         var productUrl=`https://${shopdomain}/products/${handle}`

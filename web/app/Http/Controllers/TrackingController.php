@@ -39,6 +39,42 @@ class TrackingController extends HelperController
         return response()->json($data);
     }
 
+    private function validateModernStoreName(Request $request, $themeType = null)
+    {
+        $themeType = $themeType ?? $request->theme_type;
+        if ($themeType !== 'Modern') {
+            return null;
+        }
+
+        $data = $request->data;
+        if (is_string($data)) {
+            $decoded = json_decode($data, true);
+            $data = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+        }
+        if (!is_array($data)) {
+            $data = [];
+        }
+
+        $pageData = $data['pageData'] ?? [];
+        if (is_string($pageData)) {
+            $decodedPageData = json_decode($pageData, true);
+            $pageData = json_last_error() === JSON_ERROR_NONE ? $decodedPageData : [];
+        }
+        if (!is_array($pageData)) {
+            $pageData = [];
+        }
+
+        $storeName = $pageData['store_name'] ?? '';
+        if (!is_string($storeName) || trim($storeName) === '') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Store name is required',
+            ], 422);
+        }
+
+        return null;
+    }
+
     public function create_tracking_page(Request $request)
     {
 
@@ -46,6 +82,10 @@ class TrackingController extends HelperController
 //        $session = Session::where('shop', $session_obj->getShop())->first();
 
         $session = $this->getShop($request);
+
+        if ($validationError = $this->validateModernStoreName($request)) {
+            return $validationError;
+        }
 
         DB::beginTransaction();
         try {
@@ -147,6 +187,12 @@ class TrackingController extends HelperController
 //        $session = Session::where('shop', $session_obj->getShop())->first();
         $session = $this->getShop($request);
         $tracking_page = TrackingPage::find($id);
+
+        $themeType = $request->theme_type ?: ($tracking_page->theme_type ?? null);
+        if ($validationError = $this->validateModernStoreName($request, $themeType)) {
+            return $validationError;
+        }
+
         try {
 //            if($tracking_page->theme_type === 'Modern'){
                 $tracking_page->page_name = $request->page_name;
@@ -276,6 +322,7 @@ class TrackingController extends HelperController
             $themes_res = json_decode(json_encode($themes_res['body']['themes']), false);
 //            $content=view('simple_tracking_page')->render();
             $content = file_get_contents(public_path('simple_tracking_page.text')); // Read the content of the file
+            $content = str_replace('https://app.theautotrack.com', app_public_url(), $content);
 
             if (!empty($themes_res)) {
                 foreach ($themes_res as $theme) {
