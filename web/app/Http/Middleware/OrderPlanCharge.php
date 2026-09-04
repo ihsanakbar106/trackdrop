@@ -40,6 +40,10 @@ class OrderPlanCharge
         $plan_controller = new PlanController();
 
         if (isset($user)) {
+            if (is_billing_free_shop($user->shop)) {
+                $plan_controller->ensureBillingFreeShopPlan($user);
+                return $next($request);
+            }
 
             $response = $this->helper->getShopApi($user->shop)->rest('get', '/admin/recurring_application_charges.json');
 

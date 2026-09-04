@@ -47,10 +47,75 @@
     color: rgb(28, 31, 35);
 }
 
+.OrderTable {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.OrderTable .Polaris-IndexTable__Table {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 900px;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading,
 .OrderTable .Polaris-IndexTable__TableCell {
     padding: 0 var(--p-space-400);
     vertical-align: middle;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
+
+/* Fixed column widths — short or long values must not collapse/shift columns */
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(1),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(1),
+.OrderTable .order_container {
+    width: 12%;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(2),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(2),
+.OrderTable .tracking_container {
+    width: 16%;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(3),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(3),
+.OrderTable .carrier_container {
+    width: 12%;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(4),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(4),
+.OrderTable .status_container {
+    width: 14%;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(5),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(5),
+.OrderTable .event_container {
+    width: 22%;
+}
+
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(6),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(6),
+.OrderTable .Polaris-IndexTable__TableHeading:nth-child(7),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(7),
+.OrderTable .date_container {
+    width: 12%;
+}
+
+.OrderTable .order-number-text,
+.OrderTable .tracking-number-text,
+.OrderTable .cell-ellipsis {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 
 /* .OrderTable .tracking_container, .OrderTable .order_container {
     padding-left: 0!important;

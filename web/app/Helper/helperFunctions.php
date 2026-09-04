@@ -47,3 +47,43 @@ if (!function_exists('app_public_url')) {
         return $raw;
     }
 }
+
+if (!function_exists('billing_free_shops')) {
+    /**
+     * Shops that get full app access with no Shopify billing charges.
+     * Env: BILLING_FREE_SHOPS=goom.myshopify.com,other.myshopify.com
+     */
+    function billing_free_shops(): array
+    {
+        $raw = (string) env('BILLING_FREE_SHOPS', '');
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(function ($shop) {
+            $shop = strtolower(trim($shop));
+            if ($shop === '') {
+                return null;
+            }
+            if (!str_ends_with($shop, '.myshopify.com')) {
+                $shop .= '.myshopify.com';
+            }
+            return $shop;
+        }, explode(',', $raw))));
+    }
+}
+
+if (!function_exists('is_billing_free_shop')) {
+    function is_billing_free_shop($shop): bool
+    {
+        if (!$shop) {
+            return false;
+        }
+        $shop = strtolower(trim((string) $shop));
+        if (!str_ends_with($shop, '.myshopify.com')) {
+            $shop .= '.myshopify.com';
+        }
+
+        return in_array($shop, billing_free_shops(), true);
+    }
+}

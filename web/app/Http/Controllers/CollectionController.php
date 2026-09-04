@@ -68,21 +68,21 @@ class CollectionController extends Controller
             }
             if ($paginfo['hasNextPage']) {
                 $endCursor = $paginfo['endCursor'];
-                return $this->syncCollections($shop, $endCursor);
+                return $this->sync_collections($shop_name, $endCursor);
             }
         }
 
     }
     function CreateUpdateCollection($collectionData, $shop)
     {
-        $collectionNode = $collectionData['node']['container'];
-//         dd($productNode);
+        $collectionNode = $collectionData['node']['container'] ?? $collectionData['node'];
 
-        // // dd($productNode['options']);
         $shop_id = $shop->id;
         $pId = $collectionNode['id'];
         $numericPId = substr($pId, strrpos($pId, '/') + 1);
-        $collection = Collection::where('shopify_id', $numericPId)->first();
+        $collection = Collection::where('shopify_collection_id', $numericPId)
+            ->where('session_id', $shop_id)
+            ->first();
         if (!$collection) {
             $collection = new Collection();
         }
@@ -93,7 +93,7 @@ class CollectionController extends Controller
         $collection->handle = $collectionNode['handle'];
         $collection->image = $collectionNode['image']!= null ? $collectionNode['image']['url'] : null;
         $collection->save();
-        $this->CollectionsProductsNew($pId,$collection->id, $shop );
+        $this->CollectionsProductsNew($numericPId, $collection->id, $shop);
         return true;
     }
 
@@ -105,11 +105,14 @@ class CollectionController extends Controller
         $productIds = [];
         $cursor = null;
         $hasNextPage = true;
+        $collectionGid = str_starts_with((string) $collectionId, 'gid://')
+            ? $collectionId
+            : 'gid://shopify/Collection/' . $collectionId;
 
         while ($hasNextPage) {
             $GET_COLLECTION_PRODUCTS_QUERY = '
             query {
-                collection(id: "gid://shopify/Collection/' . $collectionId . '") {
+                collection(id: "' . $collectionGid . '") {
                     products(first: 250' . ($cursor ? ', after: "' . $cursor . '"' : '') . ') {
                         edges {
                             node {
@@ -124,26 +127,27 @@ class CollectionController extends Controller
                 }
             }';
 
-            $api = $this->getShopify();
+            $api = $this->helper->getShopApi($shop->shop);
             $response = $api->graph($GET_COLLECTION_PRODUCTS_QUERY);
 
-            if (isset($response['body']['errors'])) {
+            if ($response['errors'] == false && isset($response['body']['data']['collection']['products'])) {
                 $productsData = $response['body']['data']['collection']['products'];
                 foreach ($productsData['edges'] as $edge) {
-                    $product_id = str_replace('gid://shopify/Product/', '', $edge['node']['id']); // Normalize product ID
+                    $product_id = str_replace('gid://shopify/Product/', '', $edge['node']['id']);
                     $db_product = Product::where('shopify_product_id', $product_id)->where('session_id', $shop->id)->first();
                     if($db_product) {
                         $productIds[] = $db_product->id;
                     }
                 }
-                $hasNextPage = $productsData['pageInfo']['hasNextPage'];
+                $hasNextPage = (bool) $productsData['pageInfo']['hasNextPage'];
                 $cursor = $productsData['pageInfo']['endCursor'];
+            } else {
+                $hasNextPage = false;
             }
         }
         foreach ($productIds as $productId) {
             CollectionProduct::updateOrCreate(
-                ['collection_id' => $collectionDbId],
-                ['product_id' => $productId]
+                ['collection_id' => $collectionDbId, 'product_id' => $productId]
             );
         }
     }

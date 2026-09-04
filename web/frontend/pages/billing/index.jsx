@@ -122,6 +122,10 @@ export default function PageName() {
                 if (response.data.confirmation_url) {
                     window.parent.location.href = response.data.confirmation_url;
                     // window.parent.open(response.data.confirmation_url,"_self");
+                } else if (response.data.free_shop) {
+                    setToastMsg(response.data.message || "Free access enabled. No charge applied.");
+                    setSuccessToast(true);
+                    fetchData();
                 }
             }
         } catch (err) {

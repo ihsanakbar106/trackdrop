@@ -110,7 +110,8 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                         if($track_shipping) {
                             $fulfillment->enable_tracking=1;
                             $fulfillment->save();
-                            $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number);
+                            $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
+                            $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                             $carrier_status=json_decode(json_encode($carrier_status),false);
                             if ($carrier_status->response === true || $carrier_status->response == "already exist") {
 
@@ -120,6 +121,9 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                                 if($tracking_company){
                                     $tracking_company_code=$tracking_company->name;
                                     $fulfillment->tracking_company=$tracking_company->name;
+                                } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
+                                    $tracking_company_code = 'Cargo';
+                                    $fulfillment->tracking_company = 'Cargo';
                                 }
                                 $fulfillment->save();
                                 if ($carrier_status->response === true && isset($shop)) {
@@ -135,7 +139,12 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
     //                        $common_controller = new CommonController();
     //                        $common_controller->api_statistics($shop->id, $fulfillment->order_id, $fulfillment->fulfillment_id);
 
-                                $shipping_status = $fulfillment_controller->shipping_status($fulfillment_api->id, $fulfillment_api->tracking_number, $tracking_company_code,$shop);
+                                $shipping_status = $fulfillment_controller->shipping_status(
+                                    $fulfillment_api->id,
+                                    $fulfillment_api->tracking_number,
+                                    $tracking_company_code ?: $original_carrier,
+                                    $shop
+                                );
 //                                $msg = new ErrorMessage();
 //                                $msg->message = 'fulfilment tracking get';
 //                                $msg->save();

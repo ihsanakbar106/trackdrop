@@ -13,12 +13,40 @@ use Shopify\Clients\Graphql;
 
 class PlanController extends HelperController
 {
+    /**
+     * Assign best available plan to billing-free shops without Shopify charges.
+     */
+    public function ensureBillingFreeShopPlan(Session $session): bool
+    {
+        if (!is_billing_free_shop($session->shop)) {
+            return false;
+        }
+
+        $plan = Plan::query()
+            ->orderByDesc('unlimited')
+            ->orderByDesc('response_limit')
+            ->orderBy('id')
+            ->first();
+
+        if (!$plan) {
+            return false;
+        }
+
+        if ((int) $session->plan_id !== (int) $plan->id) {
+            $session->plan_id = $plan->id;
+            $session->save();
+        }
+
+        return true;
+    }
 
     public function all_plans(Request $request)
     {
 //        $session_obj = $request->get('shopifySession');
 //        $session = Session::where('shop', $session_obj->getShop())->first();
         $session = $this->getShop($request);
+        $this->ensureBillingFreeShopPlan($session);
+        (new SyncController())->triggerInitialOrderSyncIfNeeded($session);
         $active_plan = null;
         $common_controller = new CommonController();
         $total_req=$common_controller->get_api_statistics($session);
@@ -144,6 +172,22 @@ class PlanController extends HelperController
         $session = $this->getShop($request);
         try {
             $id = $request['plan_id'];
+
+            // Whitelisted free shops: assign plan locally, never create Shopify charge.
+            if (is_billing_free_shop($session->shop)) {
+                $plan = Plan::find($id) ?: Plan::query()->orderByDesc('response_limit')->first();
+                if ($plan) {
+                    $session->plan_id = $plan->id;
+                    $session->save();
+                }
+                $data = [
+                    'status' => 'success',
+                    'message' => 'Free access enabled for this store. No charge applied.',
+                    'free_shop' => true,
+                ];
+                return response($data);
+            }
+
             $res = $this->planCreate($id, $session);
             if($res != 'error'){
                 $data = [
@@ -339,6 +383,10 @@ QUERY;
     public function check_app_active_plan($shop)
     {
         $shop = Session::where('shop', $shop)->first();
+
+        if ($shop && $this->ensureBillingFreeShopPlan($shop)) {
+            return ['status' => 'free_shop'];
+        }
 
         $response = $this->getShopApi($shop->shop)->rest('get', '/admin/recurring_application_charges.json');
 

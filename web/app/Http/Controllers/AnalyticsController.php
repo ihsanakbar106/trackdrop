@@ -21,6 +21,8 @@ class AnalyticsController extends HelperController
         //        $session_obj = $request->get('shopifySession');
 //        $session = Session::where('shop', $session_obj->getShop())->first();
         $session = $this->getShop($request);
+        (new PlanController())->ensureBillingFreeShopPlan($session);
+        (new SyncController())->triggerInitialOrderSyncIfNeeded($session);
         $carrier_array = null;
         $common_controller = new CommonController();
         $total_req=$common_controller->get_api_statistics($session);

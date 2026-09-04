@@ -28,6 +28,7 @@ use App\Models\Status;
 use App\Models\Variant;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
@@ -214,6 +215,9 @@ class SyncController extends HelperController
     {
         try {
             $shop = Session::where('shop', $shop_name)->first();
+            if (!$shop) {
+                return false;
+            }
             $fulfillment_controller = new FulfillmentController();
 
             $days = null;
@@ -236,135 +240,150 @@ class SyncController extends HelperController
             }
 
 
-            $order_count_api = $this->getShopApi($shop->shop)
-                ->rest('get', '/admin/orders/count', ['status' => 'any']);
-//        dd($order_count_api);
-            if ($order_count_api['errors'] === false) {
-                $count = ceil($order_count_api['body']['count'] / 250);
+            $sync_controller = new SyncController();
+            $next_page = '';
+            $completedWithoutApiError = true;
 
-                $next_page = '';
-                $sync_controller = new SyncController();
-                for ($i = 1; $i <= $count; $i++) {
-                    if (isset($next_page)) {
-                        if ($next_page == '') {
-                            $params = ['limit' => 250, 'status' => 'any', 'created_at_min' => $days];
-//                    $params = ['limit' => 250, 'page_info' => $next_page];
-                        } else {
-                            $params = ['limit' => 250, 'page_info' => $next_page];
-                        }
+            do {
+                    if ($next_page === '') {
+                        $params = ['limit' => 250, 'status' => 'any', 'created_at_min' => $days];
+                    } else {
+                        $params = ['limit' => 250, 'page_info' => $next_page];
+                    }
 
-                        $order_api = $this->getShopApi($shop->shop)->rest('get', '/admin/orders', $params);
-//                    dd($order_api);
+                    $order_api = $this->getShopApi($shop->shop)->rest('get', '/admin/orders', $params);
 
-                        if ($order_api['errors'] === false) {
-                            $order_api = $order_api['body']['orders'];
-                            if (!empty($order_api)) {
-                                foreach ($order_api as $order) {
-                                    $sync_controller->createUpdateOrder($order, $shop);
-//                            dispatch(new AllOrderCreateUpdateJob($order, $shop))->onConnection("database");
-                                    if (!empty($order['fulfillments'])) {
-                                        foreach ($order['fulfillments'] as $fulfillment_api) {
-                                            $fulfillment_api = json_decode(json_encode($fulfillment_api), false);
-                                            $sync_controller->createUpdateFufillment($fulfillment_api, $shop);
-//                                    dispatch(new AllFulfillmentCreateUpdateJob($fulfillment_api, $shop));
-                                            if (isset($fulfillment_api) && isset($fulfillment_api->tracking_company) && $shop && $shop->plan_id) {
-                                                $fulfillment = Fulfillment::with('order')->where('fulfillment_id', $fulfillment_api->id)->first();
-                                                $order = $fulfillment->order;
-                                                if (isset($fulfillment) && isset($order)) {
-                                                    $shopify_order_id=$order->shopify_order_id;
+                    if ($order_api['errors'] !== false) {
+                        $completedWithoutApiError = false;
+                        break;
+                    }
+
+                    $orders = $order_api['body']['orders'] ?? [];
+                    if (!empty($orders)) {
+                        foreach ($orders as $order) {
+                            $sync_controller->createUpdateOrder($order, $shop);
+                            if (!empty($order['fulfillments'])) {
+                                foreach ($order['fulfillments'] as $fulfillment_api) {
+                                    $fulfillment_api = json_decode(json_encode($fulfillment_api), false);
+                                    $sync_controller->createUpdateFufillment($fulfillment_api, $shop);
+                                    if (isset($fulfillment_api) && isset($fulfillment_api->tracking_company) && $shop && $shop->plan_id) {
+                                        $fulfillment = Fulfillment::with('order')->where('fulfillment_id', $fulfillment_api->id)->first();
+                                        $order = $fulfillment->order;
+                                        if (isset($fulfillment) && isset($order)) {
+                                            $shopify_order_id=$order->shopify_order_id;
 //
-                                                    $country = null;
-                                                    if (json_decode($order->shipping_address) != '' && json_decode($order->shipping_address) != null) {
-                                                        $shipp_add = json_decode($order->shipping_address);
-                                                        $country = $shipp_add->country;
-                                                    } elseif (json_decode($order->billing_address) != '' && json_decode($order->billing_address) != null) {
-                                                        $bill_add = json_decode($order->billing_address);
-                                                        $country = $bill_add->country;
-                                                    }
-                                                    $plan=Plan::where('id',$shop->plan_id)->first();
-                                                    $common_controller = new CommonController();
-                                                    $total_req=$common_controller->get_api_statistics($shop);
+                                            $country = null;
+                                            if (json_decode($order->shipping_address) != '' && json_decode($order->shipping_address) != null) {
+                                                $shipp_add = json_decode($order->shipping_address);
+                                                $country = $shipp_add->country;
+                                            } elseif (json_decode($order->billing_address) != '' && json_decode($order->billing_address) != null) {
+                                                $bill_add = json_decode($order->billing_address);
+                                                $country = $bill_add->country;
+                                            }
+                                            $plan=Plan::where('id',$shop->plan_id)->first();
+                                            $common_controller = new CommonController();
+                                            $total_req=$common_controller->get_api_statistics($shop);
 
+                                            $track_shipping=0;
+                                            $add_usagecharges=0;
+                                            if($plan->response_limit >$total_req){
+                                                $track_shipping=1;
+                                            }elseif ($total_req >= $plan->response_limit && $plan->id!=1){
+                                                $track_shipping=1;
+                                                $add_usagecharges=1;
+                                            }
+                                            $get_shop=Session::where('id',$shop->id)->first();
+                                            $c_date=Carbon::now();
+                                            $n_date=Carbon::parse($get_shop->created_at)->addDay(5);
+                                            if (!$n_date->greaterThan($c_date)) {
+                                                if($get_shop->total_shipment_track < 100){
+                                                    $track_shipping=1;
+                                                }else{
                                                     $track_shipping=0;
-                                                    $add_usagecharges=0;
-                                                    if($plan->response_limit >$total_req){
-                                                        $track_shipping=1;
-                                                    }elseif ($total_req >= $plan->response_limit && $plan->id!=1){
-                                                        $track_shipping=1;
-                                                        $add_usagecharges=1;
+                                                }
+                                            }
+                                            if($track_shipping) {
+                                                $fulfillment->enable_tracking=1;
+                                                $fulfillment->save();
+                                                $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
+                                                $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
+                                                $carrier_status=json_decode(json_encode($carrier_status),false);
+                                                if ($carrier_status->response === true || $carrier_status->response == "already exist") {
+
+                                                    $fulfillment->tracking_company=$carrier_status->courier_code;
+                                                    $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
+                                                    $tracking_company_code="";
+                                                    if($tracking_company){
+                                                        $tracking_company_code=$tracking_company->name;
+                                                        $fulfillment->tracking_company=$tracking_company->name;
+                                                    } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
+                                                        $tracking_company_code = 'Cargo';
+                                                        $fulfillment->tracking_company = 'Cargo';
                                                     }
-                                                    $get_shop=Session::where('id',$shop->id)->first();
-                                                    $c_date=Carbon::now();
-                                                    $n_date=Carbon::parse($get_shop->created_at)->addDay(5);
-                                                    if (!$n_date->greaterThan($c_date)) {
-                                                        if($get_shop->total_shipment_track < 100){
-                                                            $track_shipping=1;
-                                                        }else{
-                                                            $track_shipping=0;
+                                                    $fulfillment->save();
+                                                    if ($carrier_status->response === true && isset($shop)) {
+                                                        $get_shop->total_shipment_track=$get_shop->total_shipment_track+1;
+                                                        $get_shop->save();
+                                                        $common_controller->api_statistics($order->session_id, $fulfillment->order_id, $fulfillment->fulfillment_id);
+                                                        if ($add_usagecharges || $plan->unlimited) {
+                                                            $fulfillment_controller->add_usage_charge($shop->shop,$plan);
                                                         }
+
                                                     }
-                                                    if($track_shipping) {
-                                                        $fulfillment->enable_tracking=1;
-                                                        $fulfillment->save();
-                                                        $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number);
-                                                        $carrier_status=json_decode(json_encode($carrier_status),false);
-//                                                        $msg = new ErrorMessage();
-//                                                        $msg->message = 'tracking job carrier_status'.json_encode($carrier_status);
-//                                                        $msg->save();
-                                                        if ($carrier_status->response === true || $carrier_status->response == "already exist") {
+                                                    $shipping_status = $fulfillment_controller->shipping_status(
+                                                        $fulfillment_api->id,
+                                                        $fulfillment_api->tracking_number,
+                                                        $tracking_company_code ?: $original_carrier,
+                                                        $shop
+                                                    );
 
-                                                            $fulfillment->tracking_company=$carrier_status->courier_code;
-                                                            $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
-                                                            $tracking_company_code="";
-                                                            if($tracking_company){
-                                                                $tracking_company_code=$tracking_company->name;
-                                                                $fulfillment->tracking_company=$tracking_company->name;
-                                                            }
-                                                            $fulfillment->save();
-                                                            if ($carrier_status->response === true && isset($shop)) {
-                                                                $get_shop->total_shipment_track=$get_shop->total_shipment_track+1;
-                                                                $get_shop->save();
-                                                                $common_controller->api_statistics($order->session_id, $fulfillment->order_id, $fulfillment->fulfillment_id);
-                                                                if ($add_usagecharges || $plan->unlimited) {
-                                                                    $fulfillment_controller->add_usage_charge($shop->shop,$plan);
-                                                                }
+                                                    if ($shipping_status != false) {
+                                                        $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment, $shop, $country);
 
-                                                            }
-                                                            $shipping_status = $fulfillment_controller->shipping_status($fulfillment_api->id, $fulfillment_api->tracking_number, $tracking_company_code,$shop);
-
-                                                            if ($shipping_status != false) {
-                                                                //                    maitain the tracktory api success request logs
-                                                                //                            $common_controller = new CommonController();
-                                                                //                            $common_controller->api_statistics($shop->id, $fulfillment->order_id, $fulfillment->fulfillment_id);
-
-                                                                $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment, $shop, $country);
-
-                                                                $sync_controller->updateCarrier($shopify_order_id);
-//                                    $msg = new ErrorMessage();
-//                                    $msg->message = 'fulfilment tracking end';
-//                                    $msg->save();
-                                                            }
-                                                        }
+                                                        $sync_controller->updateCarrier($shopify_order_id);
                                                     }
-
-                                                } else {
-//            $msg = new ErrorMessage();
-//            $msg->message = 'tracking joc code not exist';
-//            $msg->save();
                                                 }
                                             }
 
                                         }
                                     }
+
                                 }
                             }
                         }
                     }
-                }
-            }
+
+                    if (!empty($order_api['link']['next'])) {
+                        $next_page = $order_api['link']['next'];
+                    } else {
+                        $next_page = null;
+                    }
+                } while ($next_page);
+
+            return $completedWithoutApiError;
         } catch (\Exception $e) {
-//            dd('Error in function sync_orders: ', $e->getMessage(),$e->getLine());
+            return false;
         }
+    }
+
+    /**
+     * Queue a one-time last-90-days order sync when merchant opens billing or dashboard.
+     * Flag is set only after OrderSyncJob succeeds so a failed run can retry.
+     */
+    public function triggerInitialOrderSyncIfNeeded(Session $session): bool
+    {
+        if (!$session || $session->initial_orders_synced_at || !$session->plan_id || (int) $session->plan_id === 1) {
+            return false;
+        }
+
+        $lockKey = 'initial_order_sync:' . $session->id;
+        if (!Cache::add($lockKey, 1, now()->addHours(24))) {
+            return false;
+        }
+
+        OrderSyncJob::dispatch($session->shop, 'Last 90 days', true)->onConnection('database');
+
+        return true;
     }
 
     public function sync_order_on_btn_click(Request $request)
@@ -375,7 +394,7 @@ class SyncController extends HelperController
         try {
 //            CreateUpdateManualOrderJob::dispatch($request['shop'],$request['specific_date])->onConnection("database");
 //            $this->sync_orders($session->shop, $request->specific_date);
-            OrderSyncJob::dispatch($session->shop, $request->specific_date);
+            OrderSyncJob::dispatch($session->shop, $request->specific_date)->onConnection('database');
             $data = [
                 'status' => 'success',
                 'message' => 'All orders will sync with in some time!'
@@ -646,7 +665,7 @@ QUERY;
     }
     public function sync_carriers()
     {
-        $api_setting = ApiSetting::where('status', 1)->first();
+        $api_setting = ApiSetting::where('api_name', 'Tracktory')->where('status', 1)->first();
 //        dump($api_setting);
         if (isset($api_setting) && isset($api_setting->api_name) && $api_setting->api_name === 'Tracktory') {
             $curl = curl_init();
@@ -1091,10 +1110,11 @@ QUERY;
                                                 $add_usagecharges = 1;
                                             }
                                             $tracking_company_code = "";
+                                            $original_carrier = $fulfillment->tracking_company;
                                             if ($track_shipping) {
 //                                            dump('updating tracking3');
 
-                                                $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number);
+                                                $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                                                 $carrier_status = json_decode(json_encode($carrier_status), false);
 //                                            dump($carrier_status);
                                                 if ($carrier_status->response === true || $carrier_status->response == "already exist") {
@@ -1104,6 +1124,9 @@ QUERY;
                                                     if ($tracking_company) {
                                                         $tracking_company_code = $tracking_company->name;
                                                         $fulfillment->tracking_company = $tracking_company->name;
+                                                    } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
+                                                        $tracking_company_code = 'Cargo';
+                                                        $fulfillment->tracking_company = 'Cargo';
                                                     }
                                                     $fulfillment->save();
                                                     if ($carrier_status->response === true && isset($shop)) {
@@ -1118,7 +1141,12 @@ QUERY;
                                             }
 //                                        dd($carrier_status);
                                             //                    maitain the tracktory api success request logs
-                                            $shipping_response = $fulfillment_controller->shipping_status($fulfillment->fulfillment_id, $fulfillment->tracking_number, $tracking_company_code, $shop);
+                                            $shipping_response = $fulfillment_controller->shipping_status(
+                                                $fulfillment->fulfillment_id,
+                                                $fulfillment->tracking_number,
+                                                $tracking_company_code ?: $original_carrier,
+                                                $shop
+                                            );
 //                                    dump($shipping_response);
                                             if ($shipping_response != false) {
                                                 $fulfillment_controller->shippingStatusUpdate($shipping_response, $fulfillment, $shop, $country);

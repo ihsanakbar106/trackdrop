@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { rmSync } from "fs";
 import https from "https";
 import react from "@vitejs/plugin-react";
 
@@ -13,6 +14,9 @@ if (
     "\nBuilding the frontend app without an API key. The frontend build will not run without an API key. Set the SHOPIFY_API_KEY environment variable when running the build command.\n"
   );
 }
+
+const rootDir = dirname(fileURLToPath(import.meta.url));
+const publicDir = resolve(rootDir, "../public");
 
 const proxyOptions = {
   target: `http://127.0.0.1:${process.env.BACKEND_PORT}`,
@@ -43,13 +47,28 @@ if (host === "localhost") {
 }
 
 export default defineConfig({
-  root: dirname(fileURLToPath(import.meta.url)),
-  plugins: [react()],
+  root: rootDir,
+  plugins: [
+    react(),
+    {
+      name: "clean-public-assets-only",
+      apply: "build",
+      buildStart() {
+        // Wipe only hashed frontend assets; keep images/, js/, index.php, etc.
+        rmSync(resolve(publicDir, "assets"), { recursive: true, force: true });
+      },
+    },
+  ],
   define: {
     "process.env.SHOPIFY_API_KEY": JSON.stringify(process.env.SHOPIFY_API_KEY),
   },
   resolve: {
     preserveSymlinks: true,
+  },
+  build: {
+    outDir: publicDir,
+    emptyOutDir: false,
+    assetsDir: "assets",
   },
   server: {
     host: "localhost",

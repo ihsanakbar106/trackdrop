@@ -708,10 +708,10 @@ export default function Orders() {
       return (
         <IndexTable.Row id={id} key={id} selected={selectedResources.includes(id)} position={index} onClick={() => handleSelectionChange(id)}>
           <IndexTable.Cell className="order_container">
-            <div className="TableCell__Content row-show w-[50px]">
+            <div className="TableCell__Content row-show">
               <LegacyStack vertical spacing="none">
                 <LegacyStack.Item>
-                  <div className="font-medium truncate">
+                  <div className="order-number-text">
                     <Text as="span" variant="bodyMd">
                       {order?.name}
                     </Text>
@@ -719,13 +719,13 @@ export default function Orders() {
                 </LegacyStack.Item>
               </LegacyStack>
             </div>
-            <div className="TableCell__Content row-hidden w-[50px]">
+            <div className="TableCell__Content row-hidden">
               <LegacyStack vertical spacing="none">
                 <LegacyStack.Item>
                   <LegacyStack wrap={false}>
                     <LegacyStack.Item>
-                      <div className="flex items-center justify-start">
-                        <div className="max-w-[180px] truncate">
+                      <div className="flex items-center justify-start gap-1 min-w-0">
+                        <div className="order-number-text">
                           <Link
                               accessibilityLabel="order_number"
                               monochrome
@@ -744,36 +744,13 @@ export default function Orders() {
               </LegacyStack>
             </div>
           </IndexTable.Cell>
-          <IndexTable.Cell className="tracking_container" >
-            <InlineStack blockAlign="center" wrap={false}>
-              {/*<Link accessibilityLabel="tracking_number" monochrome removeUnderline target="_blank">*/}
-                {tracking_number}
-              {/*</Link>*/}
-              {/*<div
-                className="items-center w-full gap-2"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                }}
-              >
-                <Thumbnail size="small" source={carrier_name_base?.picture || carrier_code_base?.picture} alt="Black choker necklace" />
-                <BlockStack align="space-between">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="span" variant="bodyMd">
-                      {tracking_company}
-                    </Text>
-                  </InlineStack>
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Link accessibilityLabel="tracking_number" monochrome removeUnderline target="_blank">
-                      {tracking_number}
-                    </Link>
-                  </InlineStack>
-                </BlockStack>
-              </div>*/}
-            </InlineStack>
+          <IndexTable.Cell className="tracking_container">
+            <span className="tracking-number-text">{tracking_number || "-"}</span>
           </IndexTable.Cell>
-          <IndexTable.Cell>{tracking_company ? tracking_company : "-"}</IndexTable.Cell>
-          <IndexTable.Cell>
+          <IndexTable.Cell className="carrier_container">
+            <span className="cell-ellipsis">{tracking_company ? tracking_company : "-"}</span>
+          </IndexTable.Cell>
+          <IndexTable.Cell className="status_container">
               <div className={`shipStatus-${selectBadgeTone(shipment_status)}`}>
                 <Badge progress="complete">
                   {capitalizeWords(shipment_status) === "Notfound" || capitalizeWords(shipment_status) == null
@@ -782,9 +759,15 @@ export default function Orders() {
                 </Badge>
               </div>
           </IndexTable.Cell>
-          <IndexTable.Cell className="max-w-[200px] !text-wrap">{shipment_last_event ? shipment_last_event : "No info"}</IndexTable.Cell>
-          <IndexTable.Cell>{formatDate(created_at)}</IndexTable.Cell>
-          <IndexTable.Cell>{formatDate(order?.created_at)}</IndexTable.Cell>
+          <IndexTable.Cell className="event_container">
+            <span className="cell-ellipsis">{shipment_last_event ? shipment_last_event : "No info"}</span>
+          </IndexTable.Cell>
+          <IndexTable.Cell className="date_container">
+            <span className="cell-ellipsis">{formatDate(created_at)}</span>
+          </IndexTable.Cell>
+          <IndexTable.Cell className="date_container">
+            <span className="cell-ellipsis">{formatDate(order?.created_at)}</span>
+          </IndexTable.Cell>
         </IndexTable.Row>
       );
     },

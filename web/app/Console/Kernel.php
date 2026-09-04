@@ -18,6 +18,7 @@ class Kernel extends ConsoleKernel
     protected $commands = [
         Commands\PlanChargeStatus::class,
         Commands\UpdateOrderTrackingDetailCron::class,
+        Commands\RegisterCargoWebhook::class,
     ];
 
     /**

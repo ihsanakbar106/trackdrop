@@ -572,10 +572,308 @@ class FulfillmentController extends HelperController
 
         }
     }
+    public function isCargoCarrier($carrierName): bool
+    {
+        if ($carrierName === null || $carrierName === '') {
+            return false;
+        }
+        $normalized = strtolower(trim((string) $carrierName));
+        $normalized = preg_replace('/\s+/', '', $normalized);
+
+        return in_array($normalized, [
+            'cargo',
+            'cargo.co.il',
+            'cargocoil',
+            'cargoexpress',
+            'cargologistics',
+        ], true) || str_starts_with($normalized, 'cargo');
+    }
+
+    public function getCargoApiSetting()
+    {
+        return ApiSetting::where('api_name', 'Cargo')->where('status', 1)->first();
+    }
+
+    public function getTracktoryApiSetting()
+    {
+        return ApiSetting::where('api_name', 'Tracktory')->where('status', 1)->first();
+    }
+
+    public function ensureCargoCarrier()
+    {
+        $carrier = Carrier::where('code', 'cargo')->first();
+        if (!$carrier) {
+            $carrier = Carrier::where('name', 'Cargo')->first();
+        }
+        if ($carrier) {
+            return $carrier;
+        }
+
+        $carrier = new Carrier();
+        $carrier->name = 'Cargo';
+        $carrier->code = 'cargo';
+        $carrier->carrier_service_id = 1;
+        $carrier->save();
+
+        return $carrier;
+    }
+
+    public function mapCargoStatusCode($statusCode): string
+    {
+        $code = (int) $statusCode;
+        $map = [
+            1 => 'pending',
+            12 => 'pending',
+            2 => 'transit',
+            4 => 'transit',
+            7 => 'transit',
+            9 => 'transit',
+            25 => 'transit',
+            50 => 'out for delivery',
+            51 => 'out for delivery',
+            52 => 'out for delivery',
+            3 => 'delivered',
+            55 => 'delivered',
+            5 => 'exception',
+            8 => 'exception',
+        ];
+
+        return $map[$code] ?? 'pending';
+    }
+
+    /**
+     * Normalize Cargo get-status / webhook payload into shippingStatusUpdate shape.
+     */
+    public function normalizeCargoStatusResponse($payload, $trackingNumber)
+    {
+        $data = is_array($payload) ? $payload : (array) $payload;
+        if (isset($data['data']) && (is_array($data['data']) || is_object($data['data']))) {
+            $data = (array) $data['data'];
+        }
+
+        $shipmentId = $data['shipment_id'] ?? $trackingNumber;
+        $statusCode = $data['status_code'] ?? null;
+        $statusText = $data['status_text_en'] ?? ($data['status_text'] ?? 'No info');
+        $statusDate = $data['status_date'] ?? now()->format('Y-m-d H:i:s');
+        $city = $data['city'] ?? '';
+        $state = $data['state'] ?? '';
+        $deliveryStatus = $this->mapCargoStatusCode($statusCode);
+
+        return (object) [
+            'data' => [
+                (object) [
+                    'id' => (string) $shipmentId,
+                    'tracking_number' => (string) ($trackingNumber ?: $shipmentId),
+                    'courier_code' => 'cargo',
+                    'delivery_status' => $deliveryStatus,
+                    'substatus' => $statusCode !== null ? (string) $statusCode : null,
+                    'latest_event' => $statusText,
+                    'latest_checkpoint_time' => $statusDate,
+                    'origin_country' => $state ?: $city,
+                    'origin_info' => (object) [
+                        'trackinfo' => [
+                            (object) [
+                                'checkpoint_date' => $statusDate,
+                                'tracking_detail' => $statusText,
+                                'location' => trim($city . ' ' . $state),
+                                'checkpoint_delivery_status' => $deliveryStatus,
+                            ],
+                        ],
+                        'milestone_date' => (object) [],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    public function carrier_register_cargo($tracking_number)
+    {
+        if (!$this->getCargoApiSetting()) {
+            return [
+                'response' => false,
+                'courier_code' => '',
+            ];
+        }
+
+        $this->ensureCargoCarrier();
+
+        return [
+            'response' => true,
+            'courier_code' => 'cargo',
+        ];
+    }
+
+    public function shipping_status_cargo($fulfillment_id, $tracking_number, $shop = null)
+    {
+        $api_setting = $this->getCargoApiSetting();
+        if (!$api_setting || !$api_setting->api_key || !$api_setting->customer_code) {
+            return false;
+        }
+
+        $shipmentId = is_numeric($tracking_number) ? (int) $tracking_number : null;
+        if ($shipmentId === null) {
+            $fulfillment = Fulfillment::where('fulfillment_id', $fulfillment_id)->first();
+            if ($fulfillment && is_numeric($fulfillment->shipment_id)) {
+                $shipmentId = (int) $fulfillment->shipment_id;
+            }
+        }
+        if ($shipmentId === null) {
+            return false;
+        }
+
+        $client = new Client();
+        try {
+            $response = $client->request('POST', 'https://api-v2.cargo.co.il/api/shipments/get-status', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $api_setting->api_key,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ],
+                'json' => [
+                    'shipment_id' => $shipmentId,
+                    'customer_code' => (int) $api_setting->customer_code,
+                ],
+                'http_errors' => false,
+                'timeout' => 60,
+            ]);
+            $status = $response->getStatusCode();
+            $body = json_decode($response->getBody()->getContents(), true);
+            if ($status < 200 || $status >= 300 || !is_array($body) || !empty($body['errors'])) {
+                return false;
+            }
+
+            return $this->normalizeCargoStatusResponse($body, $tracking_number);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    public function registerCargoWebhook($webhookUrl = null)
+    {
+        $api_setting = $this->getCargoApiSetting();
+        if (!$api_setting || !$api_setting->api_key || !$api_setting->customer_code) {
+            return [
+                'success' => false,
+                'message' => 'Cargo api_settings row missing (api_name=Cargo, api_key, customer_code, status=1).',
+            ];
+        }
+
+        $url = $webhookUrl ?: (rtrim(env('APP_URL'), '/') . '/api/webhooks/cargo-status-update');
+        $client = new Client();
+        try {
+            $response = $client->request('POST', 'https://api-v2.cargo.co.il/api/webhooks/create', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $api_setting->api_key,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ],
+                'json' => [
+                    'type' => 'status-update',
+                    'webhook_url' => $url,
+                    'customer_code' => (int) $api_setting->customer_code,
+                ],
+                'http_errors' => false,
+                'timeout' => 60,
+            ]);
+            $status = $response->getStatusCode();
+            $body = json_decode($response->getBody()->getContents(), true);
+            $ok = $status >= 200 && $status < 300;
+            if (is_array($body)) {
+                $first = isset($body[0]) && is_array($body[0]) ? $body[0] : $body;
+                if (array_key_exists('errors', $first) && !empty($first['errors'])) {
+                    $ok = false;
+                }
+            } else {
+                $ok = false;
+            }
+
+            return [
+                'success' => $ok,
+                'status' => $status,
+                'body' => $body,
+                'webhook_url' => $url,
+                'message' => $ok ? 'Webhook registered.' : 'Cargo rejected webhook registration.',
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    public function handleCargoStatusWebhook(Request $request)
+    {
+        $secret = env('CARGO_WEBHOOK_SECRET');
+        if (empty($secret) && app()->environment('production')) {
+            return response()->json(['status' => 'error', 'message' => 'Webhook secret not configured'], 503);
+        }
+        if (!empty($secret)) {
+            $provided = $request->header('X-Cargo-Webhook-Secret')
+                ?: $request->query('secret');
+            if ($provided !== $secret) {
+                return response()->json(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            }
+        }
+
+        $payload = $request->all();
+        if (empty($payload)) {
+            $decoded = json_decode($request->getContent(), true);
+            $payload = is_array($decoded) ? $decoded : [];
+        }
+
+        $data = $payload['data'] ?? $payload;
+        if (isset($data[0]) && is_array($data[0])) {
+            $data = $data[0]['data'] ?? $data[0];
+        }
+        $shipmentId = $data['shipment_id'] ?? ($payload['shipment_id'] ?? null);
+        if ($shipmentId === null || $shipmentId === '') {
+            return response()->json(['status' => 'error', 'message' => 'shipment_id required'], 422);
+        }
+
+        $shipmentIdStr = (string) $shipmentId;
+        $matches = Fulfillment::query()
+            ->where(function ($q) use ($shipmentIdStr) {
+                $q->where('shipment_id', $shipmentIdStr)
+                    ->orWhere('tracking_number', $shipmentIdStr);
+            })
+            ->where(function ($q) {
+                $q->whereRaw('LOWER(tracking_company) LIKE ?', ['%cargo%'])
+                    ->orWhere('tracking_company', 'cargo');
+            })
+            ->orderByDesc('updated_at')
+            ->get();
+
+        if ($matches->isEmpty()) {
+            return response()->json(['status' => 'error', 'message' => 'Fulfillment not found'], 404);
+        }
+        if ($matches->count() > 1) {
+            $sessionIds = $matches->pluck('session_id')->unique();
+            if ($sessionIds->count() > 1) {
+                return response()->json(['status' => 'error', 'message' => 'Ambiguous fulfillment match'], 409);
+            }
+        }
+
+        $fulfillment = $matches->first();
+
+        $shop = Session::find($fulfillment->session_id);
+        $normalized = $this->normalizeCargoStatusResponse(
+            ['data' => $data, 'errors' => false],
+            $fulfillment->tracking_number ?: $shipmentIdStr
+        );
+        $this->shippingStatusUpdate($normalized, $fulfillment, $shop);
+
+        return response()->json(['status' => 'success']);
+    }
+
     public function carrier_register($tracking_number, $carrier=null)
     {
+        if ($this->isCargoCarrier($carrier)) {
+            return $this->carrier_register_cargo($tracking_number);
+        }
+
 //Track123
-        $api_setting = ApiSetting::where('status', 1)->first();
+        $api_setting = $this->getTracktoryApiSetting();
 
         $data = [[
             "trackNo" => "$tracking_number",
@@ -822,11 +1120,14 @@ class FulfillmentController extends HelperController
     }
     public function shipping_status($fulfillment_id, $tracking_number, $carrier,$shop)
     {
+        if ($this->isCargoCarrier($carrier)) {
+            return $this->shipping_status_cargo($fulfillment_id, $tracking_number, $shop);
+        }
 
-        $api_setting = ApiSetting::where('status', 1)->first();
+        $api_setting = $this->getTracktoryApiSetting();
         $exclude_keywords=[];
 //        if($shop) {
-            if ($shop->dropshipping_mode && $shop->dropshipping_keyword) {
+            if ($shop && $shop->dropshipping_mode && $shop->dropshipping_keyword) {
                 $exclude_keywords = explode(',', $shop->dropshipping_keyword);
 
             }
@@ -1654,6 +1955,9 @@ class FulfillmentController extends HelperController
 
     public function add_usage_charge($shop_name,$plan)
     {
+        if (is_billing_free_shop($shop_name)) {
+            return true;
+        }
         {/*change 7 start*/
         }
         return true;

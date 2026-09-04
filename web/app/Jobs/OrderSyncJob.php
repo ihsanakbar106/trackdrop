@@ -4,41 +4,43 @@ namespace App\Jobs;
 
 use App\Http\Controllers\SyncController;
 use App\Models\Session;
-use App\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 
 class OrderSyncJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
     public $timeout = 100000000000;
-    /**
-     * Create a new job instance.
-     *
-     * @return void
-     */
+
     public $shop;
     public $specific_date;
-    public function __construct($shop,$specific_date)
+    public $isInitialSync;
+
+    public function __construct($shop, $specific_date, $isInitialSync = false)
     {
         $this->shop = $shop;
         $this->specific_date = $specific_date;
+        $this->isInitialSync = (bool) $isInitialSync;
     }
 
-    /**
-     * Execute the job.
-     *
-     * @return void
-     */
     public function handle()
     {
-        $specific_date = $this->specific_date;
-        $shop = $this->shop;
-
         $sync_controller = new SyncController();
-        $sync_controller->sync_orders($shop, $specific_date);
+        $ok = $sync_controller->sync_orders($this->shop, $this->specific_date);
+
+        if ($this->isInitialSync) {
+            $session = Session::where('shop', $this->shop)->first();
+            if ($session) {
+                Cache::forget('initial_order_sync:' . $session->id);
+                if ($ok) {
+                    $session->initial_orders_synced_at = now();
+                    $session->save();
+                }
+            }
+        }
     }
 }

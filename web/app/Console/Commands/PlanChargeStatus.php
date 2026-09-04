@@ -50,6 +50,11 @@ class PlanChargeStatus extends Command
         Session::orderBy('id')->chunk(50, function ($users) {
             $helper_controller = new HelperController();
             foreach ($users as $user) {
+                if (isset($user) && is_billing_free_shop($user->shop)) {
+                    (new \App\Http\Controllers\PlanController())->ensureBillingFreeShopPlan($user);
+                    continue;
+                }
+
                 if (isset($user) && isset($user->plan_id)) {
 
                     $response = $helper_controller->getShopApi($user->shop)->rest('get', '/admin/recurring_application_charges.json');

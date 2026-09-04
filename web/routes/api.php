@@ -211,6 +211,8 @@ Route::any('test-flow', function (Request $request) {
 
 
 //webhooks
+Route::post('/webhooks/cargo-status-update', [FulfillmentController::class, 'handleCargoStatusWebhook']);
+
 Route::post('/webhooks/app-uninstall', function (Request $request) {
     try {
         $shop_name = $request->header('x-shopify-shop-domain');
