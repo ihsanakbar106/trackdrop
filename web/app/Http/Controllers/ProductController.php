@@ -180,46 +180,80 @@ class ProductController extends HelperController
     }
     function createUpdateProduct($productData, $shop)
     {
-        $productNode = $productData['node']['container'];
+        $productNode = $productData['node']['container'] ?? null;
+        if ($productNode === null) {
+            return false;
+        }
+        // GraphQL client may return ResponseAccess objects — normalize for array access / implode.
+        if ($productNode instanceof \Gnikyt\BasicShopifyAPI\ResponseAccess) {
+            $productNode = $productNode->toArray();
+        } elseif (is_object($productNode)) {
+            $productNode = json_decode(json_encode($productNode), true) ?: [];
+        }
 
-//        dump($productNode);
         $shop_id = $shop->id;
-        $pId =  $productNode['id'];
+        $pId = $productNode['id'] ?? null;
+        if (!$pId) {
+            return false;
+        }
         $numericPId = substr($pId, strrpos($pId, '/') + 1);
         $product_save = Product::where('shopify_product_id', $numericPId)->where('session_id', $shop->id)->first();
         if ($product_save === null) {
             $product_save = new Product();
         }
-        $variant_id =  $productNode['variants']['edges'][0]['node']['id'];
-        $numeric_variantId = substr($variant_id, strrpos($variant_id, '/') + 1);
+
+        $variantEdges = data_get($productNode, 'variants.edges', []);
+        $firstVariantId = data_get($variantEdges, '0.node.id');
+        $numeric_variantId = $firstVariantId
+            ? substr($firstVariantId, strrpos($firstVariantId, '/') + 1)
+            : null;
+
+        $tags = $productNode['tags'] ?? [];
+        if ($tags instanceof \Gnikyt\BasicShopifyAPI\ResponseAccess) {
+            $tags = $tags->toArray();
+        } elseif (!is_array($tags)) {
+            $tags = $tags === null || $tags === '' ? [] : (array) $tags;
+        }
+
+        $options = $productNode['options'] ?? [];
+        if ($options instanceof \Gnikyt\BasicShopifyAPI\ResponseAccess) {
+            $options = $options->toArray();
+        }
 
         $product_save->shopify_product_id = $numericPId;
         $product_save->shopify_variant_id = $numeric_variantId;
         $product_save->session_id = $shop->id;
         $product_save->is_gifted = data_get($productNode, 'isGiftCard') == true ? 1 : 0;
-        $product_save->body_html = $productNode['description'];
-        $product_save->title = $productNode['title'];
-        $product_save->product_type = $productNode['productType'];
-        $product_save->handle = $productNode['handle'];
-        $product_save->product_status = $productNode['status'];
-        $product_save->tags = implode(',', $productNode['tags']);
-        $product_save->vendor = $productNode['vendor'];
+        $product_save->body_html = $productNode['description'] ?? null;
+        $product_save->title = $productNode['title'] ?? null;
+        $product_save->product_type = $productNode['productType'] ?? null;
+        $product_save->handle = $productNode['handle'] ?? null;
+        $product_save->product_status = $productNode['status'] ?? null;
+        $product_save->tags = implode(',', $tags);
+        $product_save->vendor = $productNode['vendor'] ?? null;
         $product_save->image = data_get($productNode, 'featuredMedia.image.url');
-        $product_save->options = json_encode($productNode['options']);
-        $product_save->created_at = $productNode['createdAt'];
+        $product_save->options = json_encode($options);
+        $product_save->created_at = $productNode['createdAt'] ?? now();
         $product_save->save();
-//dd($product);
-        // Variants Save
-        $variants =  $productNode['variants']['edges'];
 
-        foreach ($variants as $key => $variant) {
-//            dd($variant);
-            $variantNode = $variant['node'];
-            $variantId = $variantNode['id'];
+        foreach ($variantEdges as $variant) {
+            if ($variant instanceof \Gnikyt\BasicShopifyAPI\ResponseAccess) {
+                $variant = $variant->toArray();
+            }
+            $variantNode = $variant['node'] ?? null;
+            if (!$variantNode) {
+                continue;
+            }
+            if ($variantNode instanceof \Gnikyt\BasicShopifyAPI\ResponseAccess) {
+                $variantNode = $variantNode->toArray();
+            }
+
+            $variantId = $variantNode['id'] ?? null;
+            if (!$variantId) {
+                continue;
+            }
             $numericVariantId = substr($variantId, strrpos($variantId, '/') + 1);
-//            $inventoryId = $variantNode['inventoryItem']['id'];
-//            $inventoryId = substr($inventoryId, strrpos($inventoryId, '/') + 1);
-            $inventoryId=null;
+            $inventoryId = null;
             $db_variant = Variant::where('shopify_variant_id', $numericVariantId)->first();
             if ($db_variant == null) {
                 $db_variant = new Variant();
@@ -229,15 +263,12 @@ class ProductController extends HelperController
             $db_variant->shopify_product_id = $product_save->shopify_product_id;
             $db_variant->product_id = $product_save->id;
             $db_variant->inventory_item_id = $inventoryId;
-            $db_variant->title = $variantNode['title'];
-            $db_variant->price = $variantNode['price'];
-            $db_variant->inventory_quantity = $variantNode['inventoryQuantity'];
-            $db_variant->sku = $variantNode['sku'];
+            $db_variant->title = $variantNode['title'] ?? null;
+            $db_variant->price = $variantNode['price'] ?? null;
+            $db_variant->inventory_quantity = $variantNode['inventoryQuantity'] ?? null;
+            $db_variant->sku = $variantNode['sku'] ?? null;
             $db_variant->save();
-
         }
-
-//            dump($productData);
 
         return true;
     }

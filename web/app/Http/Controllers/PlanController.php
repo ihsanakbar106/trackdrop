@@ -46,7 +46,6 @@ class PlanController extends HelperController
 //        $session = Session::where('shop', $session_obj->getShop())->first();
         $session = $this->getShop($request);
         $this->ensureBillingFreeShopPlan($session);
-        (new SyncController())->triggerInitialOrderSyncIfNeeded($session);
         $active_plan = null;
         $common_controller = new CommonController();
         $total_req=$common_controller->get_api_statistics($session);
