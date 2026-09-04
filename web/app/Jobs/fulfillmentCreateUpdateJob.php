@@ -110,12 +110,22 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                         if($track_shipping) {
                             $fulfillment->enable_tracking=1;
                             $fulfillment->save();
-                            // Keep Shopify carrier name; Track123 must not overwrite tracking_company.
                             $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
                             $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                             $carrier_status=json_decode(json_encode($carrier_status),false);
                             if ($carrier_status->response === true || $carrier_status->response == "already exist") {
 
+                                $fulfillment->tracking_company=$carrier_status->courier_code;
+                                $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
+                                $tracking_company_code="";
+                                if($tracking_company){
+                                    $tracking_company_code=$tracking_company->name;
+                                    $fulfillment->tracking_company=$tracking_company->name;
+                                } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
+                                    $tracking_company_code = 'Cargo';
+                                    $fulfillment->tracking_company = 'Cargo';
+                                }
+                                $fulfillment->save();
                                 if ($carrier_status->response === true && isset($shop)) {
                                     $get_shop->total_shipment_track=$get_shop->total_shipment_track+1;
                                     $get_shop->save();
@@ -132,7 +142,7 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                                 $shipping_status = $fulfillment_controller->shipping_status(
                                     $fulfillment_api->id,
                                     $fulfillment_api->tracking_number,
-                                    $original_carrier,
+                                    $tracking_company_code ?: $original_carrier,
                                     $shop
                                 );
 //                                $msg = new ErrorMessage();
@@ -170,7 +180,7 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                     ->where('active_status',1)->first();
                 if($tracking_page) {
                     if($tracking_page->theme_type=="Modern"){
-                        $tracking_url = app_proxy_modern_url($shop->shop, $fulfillment_save->tracking_number);
+                        $tracking_url='https://'.$shop->shop.'/a/track/order?tracking_number='.$fulfillment_save->tracking_number;
                     }else{
                         $tracking_url='https://'.$shop->shop.'/pages/'.$tracking_page->page_handle.'?tracking_number='.$fulfillment_save->tracking_number;
                     }

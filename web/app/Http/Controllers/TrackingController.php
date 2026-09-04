@@ -34,9 +34,7 @@ class TrackingController extends HelperController
             'tracking_pages' => $tracking_pages,
             'active_theme_id' => $active_theme_id,
             'translations' => $translations,
-            'plan_id' => $session->plan_id,
-            'modern_tracking_path' => app_proxy_modern_path(),
-            'modern_tracking_url' => app_proxy_modern_url($session->shop),
+            'plan_id' => $session->plan_id
         ];
         return response()->json($data);
     }

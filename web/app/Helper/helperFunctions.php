@@ -40,54 +40,11 @@ if (!function_exists('app_public_url')) {
         }
 
         if (!preg_match('#^https?://#i', $raw)) {
-            $raw = 'https://' . $raw;
+            $isLocalHost = in_array(strtolower(explode(':', $raw)[0]), ['127.0.0.1', 'localhost'], true);
+            $raw = ($isLocalHost ? 'http://' : 'https://') . $raw;
         }
 
         return $raw;
-    }
-}
-
-if (!function_exists('app_proxy_subpath')) {
-    /**
-     * Storefront app-proxy subpath.
-     * Prod default: track (never breaks live Modern URL).
-     * Local default: track-dev (avoids colliding with production proxy).
-     * Override anytime: APP_PROXY_SUBPATH in .env
-     */
-    function app_proxy_subpath(): string
-    {
-        $configured = trim((string) env('APP_PROXY_SUBPATH', ''));
-        if ($configured !== '') {
-            return trim($configured, '/');
-        }
-
-        // Production-safe: only local uses track-dev when env is unset.
-        if (env('APP_ENV') === 'local') {
-            return 'track-dev';
-        }
-
-        return 'track';
-    }
-}
-
-if (!function_exists('app_proxy_modern_path')) {
-    /** e.g. /a/track/order or /a/track-dev/order */
-    function app_proxy_modern_path(): string
-    {
-        return '/a/' . app_proxy_subpath() . '/order';
-    }
-}
-
-if (!function_exists('app_proxy_modern_url')) {
-    function app_proxy_modern_url(string $shop, ?string $trackingNumber = null): string
-    {
-        $shop = preg_replace('#^https?://#i', '', rtrim($shop, '/'));
-        $url = 'https://' . $shop . app_proxy_modern_path();
-        if ($trackingNumber !== null && $trackingNumber !== '') {
-            $url .= '?tracking_number=' . urlencode($trackingNumber);
-        }
-
-        return $url;
     }
 }
 

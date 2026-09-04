@@ -39,7 +39,7 @@ redirect_urls = [
 
 [app_proxy]
 url = "https://seriously-hints-ordered-separated.trycloudflare.com/track"
-subpath = "track-dev"
+subpath = "track"
 prefix = "a"
 
 [pos]

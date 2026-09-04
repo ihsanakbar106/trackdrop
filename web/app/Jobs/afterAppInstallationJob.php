@@ -3,9 +3,7 @@
 namespace App\Jobs;
 
 use App\Http\Controllers\CollectionController;
-use App\Http\Controllers\PlanController;
 use App\Http\Controllers\ProductController;
-use App\Http\Controllers\SyncController;
 use App\Models\Session;
 use App\Models\Translation;
 use App\Services\ShopifyTokenService;
@@ -127,14 +125,6 @@ class afterAppInstallationJob implements ShouldQueue
             $product_controller = new ProductController();
             if (isset($session)) {
                 $product_controller->sync_products($session->shop, null);
-            }
-
-            // Always queue 90-day order sync on install (plan not required).
-            $session = Session::where('shop', $session_name)->first();
-            if ($session) {
-                (new PlanController())->ensureBillingFreeShopPlan($session);
-                $session->refresh();
-                (new SyncController())->triggerInitialOrderSyncIfNeeded($session);
             }
         }
 

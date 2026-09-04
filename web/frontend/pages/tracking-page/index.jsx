@@ -84,7 +84,6 @@ export default function TrackingPages() {
   const navigate = useNavigate();
   const appBridge = useAppBridge();
   const { apiUrl, shop, setModernTrackingPageStyle, setModernTrackingPageTitle, setModernTrackingPageHandle, setTrackingPageType } = useContext(AppContext);
-  const [modernTrackingUrl, setModernTrackingUrl] = useState("");
   const [toggleData, setToggleData] = useState(true);
   const [loading, setLoading] = useState(true);
   const [btnLoading, setBtnLoading] = useState(false);
@@ -409,7 +408,7 @@ export default function TrackingPages() {
     );
   };
 
-  const ModernStepThree = (shop, dndData, modernTitleError, handleChangeModernData, modernTrackingUrl) => {
+  const ModernStepThree = (shop, dndData, modernTitleError, handleChangeModernData) => {
     return (
         <>
           <Text fontWeight="semibold">Step 2 of 2: Pick tracking page title</Text>
@@ -420,7 +419,7 @@ export default function TrackingPages() {
               autoComplete="off"
               error={modernTitleError ? "Page title is required" : ""}
           />
-          <TextField disabled label="URL and handle" prefix={modernTrackingUrl || `https://${shop}/a/track/order`} autoComplete="off" />
+          <TextField disabled label="URL and handle" prefix={`https://${shop}/a/track/order`} autoComplete="off" />
         </>
     );
   };
@@ -460,14 +459,13 @@ export default function TrackingPages() {
           Authorization: `Bearer ${sessionToken}`,
         },
       });
-      const { plan_id,tracking_pages, active_theme_id,translations, modern_tracking_url } = response?.data;
+      const { plan_id,tracking_pages, active_theme_id,translations } = response?.data;
       if(!plan_id){
         navigate("/billing");
       }
       // setTrackingPages(tracking_pages?.filter((page) => page?.active_status === 0) || []);
       setTrackingPages(tracking_pages);
       setAllTranslations(translations);
-      setModernTrackingUrl(modern_tracking_url || `https://${shop}/a/track/order`);
 
 
       const defaultTranslation = translations.find(
@@ -1047,7 +1045,7 @@ export default function TrackingPages() {
                                   page?.theme_type === "Traditional"?
                                       `https://${shop}/pages/${page?.page_handle}`
                                       :
-                                      (modernTrackingUrl || `https://${shop}/a/track/order`)
+                                      `https://${shop}/a/track/order`
                                 }
                               </Text>
                               <Text as="span" variant="bodyMd" tone="subdued">
@@ -1120,7 +1118,7 @@ export default function TrackingPages() {
                                             page?.theme_type === "Traditional"?
                                                 window.open(`https://${shop}/pages/${page?.page_handle}`, "_blank")
                                                 :
-                                                window.open(modernTrackingUrl || `https://${shop}/a/track/order`, "_blank")
+                                                window.open(`https://${shop}/a/track/order`, "_blank")
                                         }
                                              },
                                     page?.theme_type === "Traditional"
@@ -1519,7 +1517,7 @@ export default function TrackingPages() {
 
                     {
                       themeType === 'Modern'?
-                          <TextField disabled label="URL and handle" prefix={modernTrackingUrl || `https://${shop}/a/track/order`} autoComplete="off" />
+                          <TextField disabled label="URL and handle" prefix={`https://${shop}/a/track/order`} autoComplete="off" />
                           :
                           <TextField
                               label="URL and handle"
@@ -1610,9 +1608,9 @@ export default function TrackingPages() {
                     {
                       themeType === 'Modern'?
                           <Link
-                              url={modernTrackingUrl || `https://${shop}/a/track/order`}
+                              url={`https://${shop}/a/track/order`}
                               target="_blank"
-                          >{modernTrackingUrl || `https://${shop}/a/track/order`}</Link>
+                          >{`https://${shop}/a/track/order`}</Link>
                           :
                           <Link
                               url={`https://${shop}/pages/${dndData?.page_URL_handle}`}
@@ -1648,7 +1646,7 @@ export default function TrackingPages() {
               <BlockStack gap={"400"}>
                 {modernCurrentStep === 1
                     ? ModernStepOne(handleModernStyle)
-                    : ModernStepThree(shop, modernData, modernTitleError, handleChangeModernData, modernTrackingUrl)}
+                    : ModernStepThree(shop, modernData, modernTitleError, handleChangeModernData)}
               </BlockStack>
             </Box>
           </Modal.Section>
