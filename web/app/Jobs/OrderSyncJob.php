@@ -5,16 +5,31 @@ namespace App\Jobs;
 use App\Http\Controllers\SyncController;
 use App\Models\Session;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
-class OrderSyncJob implements ShouldQueue
+class OrderSyncJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-    public $timeout = 100000000000;
+
+    /**
+     * Must stay <= queue:work --timeout on Cloudways.
+     * Huge values still get killed by the worker and then retry → MaxAttemptsExceededException.
+     */
+    public $timeout = 3600;
+
+    /** Full-shop sync must not restart from page 1 after a timeout. */
+    public $tries = 1;
+
+    public $failOnTimeout = true;
+
+    /** Prevent stacking duplicate Last-X-days syncs for the same shop. */
+    public $uniqueFor = 3600;
 
     public $shop;
     public $specific_date;
@@ -27,8 +42,19 @@ class OrderSyncJob implements ShouldQueue
         $this->isInitialSync = (bool) $isInitialSync;
     }
 
+    public function uniqueId(): string
+    {
+        return $this->shop . '|' . $this->specific_date . '|' . ($this->isInitialSync ? '1' : '0');
+    }
+
     public function handle()
     {
+        Log::info('OrderSyncJob started', [
+            'shop' => $this->shop,
+            'specific_date' => $this->specific_date,
+            'isInitialSync' => $this->isInitialSync,
+        ]);
+
         $sync_controller = new SyncController();
         $ok = $sync_controller->sync_orders($this->shop, $this->specific_date);
 
@@ -42,5 +68,10 @@ class OrderSyncJob implements ShouldQueue
                 }
             }
         }
+
+        Log::info('OrderSyncJob finished', [
+            'shop' => $this->shop,
+            'ok' => $ok,
+        ]);
     }
 }

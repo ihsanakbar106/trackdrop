@@ -580,13 +580,14 @@ class FulfillmentController extends HelperController
         $normalized = strtolower(trim((string) $carrierName));
         $normalized = preg_replace('/\s+/', '', $normalized);
 
+        // Exact match only — do NOT use starts_with("cargo").
+        // Shopify list carriers like "Cargo Expreso GT", "Southwest Air Cargo" must NOT hit cargo.co.il.
         return in_array($normalized, [
             'cargo',
             'cargo.co.il',
             'cargocoil',
-            'cargoexpress',
             'cargologistics',
-        ], true) || str_starts_with($normalized, 'cargo');
+        ], true);
     }
 
     public function getCargoApiSetting()
@@ -2114,7 +2115,11 @@ class FulfillmentController extends HelperController
                     if ($trackingPage->theme_type === 'Modern') {
                         $data = json_decode($trackingPage->data,false);
 //                        $searchType = $data->pageData->search;
-                        if($request->track_type=="tracking-number"){
+                        // Frontend may send "tracking-number" (Modern) or "tracking_number" (Traditional templates).
+                        $trackType = (string) ($request->track_type ?? '');
+                        $isTrackingNumberSearch = in_array($trackType, ['tracking-number', 'tracking_number'], true)
+                            || ($request->filled('tracking_number') && !$request->filled('order_number'));
+                        if ($isTrackingNumberSearch) {
                             $fulfillments = Fulfillment::with(['order', 'order.lineitems','carrier_name_base', 'carrier_code_base'])
                                 ->where('tracking_number', $request->tracking_number)
                                 ->where('session_id', $shop->id)->whereNotNull('tracking_number')->latest()->get();
@@ -2254,7 +2259,8 @@ class FulfillmentController extends HelperController
 
 
      public function refreshTracking($request,$shop){
-         if (isset($request['track_type']) && $request['track_type'] == 'order-number') {
+         $trackType = (string) ($request['track_type'] ?? '');
+         if ($trackType === 'order-number') {
              $requests = $request->all();
              $fulfillments = Fulfillment::with(['order', 'order.lineitems','carrier_name_base', 'carrier_code_base'])->where('session_id', $shop->id)
                  ->whereHas('order', function ($query) use ($requests, $shop) {

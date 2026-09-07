@@ -32,29 +32,20 @@ import axios from "axios";
 import { ClipboardIcon, StatusActiveIcon } from "@shopify/polaris-icons";
 
 function formatDate(input) {
-  // Parse the input string into a Date object
+  if (!input) return "";
   const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return "";
 
-  // Function to get abbreviated month name
-  const getAbbreviatedMonthName = (monthNumber) => {
-    const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-    return months[monthNumber - 1];
-  };
-
-  // Format the date parts
+  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
   const year = date.getUTCFullYear();
-  const month = getAbbreviatedMonthName(date.getUTCMonth() + 1); // Months are zero-based
+  const month = months[date.getUTCMonth()];
   const day = ("0" + date.getUTCDate()).slice(-2);
-  let hours = ("0" + date.getUTCHours()).slice(-2);
+  let hours = date.getUTCHours();
   const minutes = ("0" + date.getUTCMinutes()).slice(-2);
-  const seconds = ("0" + date.getUTCSeconds()).slice(-2);
-
-  // Convert hours to 12-hour format and append 'am'/'pm'
   const period = hours >= 12 ? "pm" : "am";
-  hours = hours % 12 || 12; // The hour '0' should be '12'
-  hours = ("0" + hours).slice(-2); // Ensure always two digits
+  hours = hours % 12 || 12;
+  hours = ("0" + hours).slice(-2);
 
-  // Combine the formatted parts into the desired output format
   return `${month} ${day}, ${year} ${hours}:${minutes} ${period}`;
 }
 
@@ -62,44 +53,29 @@ function capitalizeWords(str) {
   return str?.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+/** Supports ISO (…T…) and Cargo-style "Y-m-d H:i:s" / missing dates. */
 const formatDateTracking = (dateString) => {
+  if (dateString == null || dateString === "") return "";
+
+  const raw = String(dateString).trim();
   const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May.", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-  const date = new Date(dateString.split('T')[0]);
-  const month = months[date.getMonth()];
-  const day = date.getDate();
-  const year = date.getFullYear();
 
-  const timePart = dateString.split('T')[1].split('-')[0]; // '12:56:00'
-  const [hours, minutes] = timePart.split(':');
-
-  // Convert 24-hour format to 12-hour format with AM/PM
-  let hour = parseInt(hours);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  hour = hour % 12 || 12; // Convert hour to 12-hour format
-
-  return `${month} ${day}, ${year} ${hours}:${minutes} ${ampm}`;
-};
-const formatDateTrackingOld = (dateString) => {
-  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May.", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-  const date = new Date(dateString);
+  // Normalize "2026-09-07 12:56:00" → parseable; strip timezone suffix after time if present
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return raw;
 
   const month = months[date.getMonth()];
   const day = date.getDate();
   const year = date.getFullYear();
 
-  let hours = date.getHours();
+  let hour = date.getHours();
   const minutes = date.getMinutes().toString().padStart(2, "0");
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const hours24 = hour.toString().padStart(2, "0");
 
-  const ampm = hours >= 12 ? "pm" : "am";
-  hours = hours % 12 || 12; // Convert 24-hour time to 12-hour time and handle midnight as 12
-
-  return `${month} ${day}, ${year} ${hours}:${minutes} ${ampm}`;
+  return `${month} ${day}, ${year} ${hours24}:${minutes} ${ampm}`;
 };
-
-const dateStr = "2022-05-22 14:10:00";
-const formattedDate = formatDate(dateStr);
-
-console.log(formattedDate); // Output: "May 22, 2022 02:10 pm"
 
 export default function DetailsShipment() {
   const navigate = useNavigate();
@@ -122,7 +98,6 @@ export default function DetailsShipment() {
   const [showMore, setShowMore] = useState(false);
 
   const [transitDays, setTransitDays] = useState(null);
-  console.log("lineItemslineItems: ", lineItems);
 
   // -------------------------- TOAST MESSAGE --------------------------
   const toggleErrorMsgActive = useCallback(() => setErrorToast((errorToast) => !errorToast), []);
@@ -141,12 +116,23 @@ export default function DetailsShipment() {
         },
       });
       const { fulfillment_data, carrier_detail } = response?.data;
-      // console.log('fulfillment_data',fulfillment_data);
       setFulfillmentData(fulfillment_data);
-      setCustomerDetails(JSON.parse(fulfillment_data?.order?.customer));
-      setTrackingInfo(JSON.parse(fulfillment_data?.track_info) || []);
-      setShippingAddress(JSON.parse(fulfillment_data?.order?.shipping_address));
-      setLineItems(fulfillment_data?.order?.lineitems);
+
+      const parseJson = (value, fallback) => {
+        if (value == null || value === "") return fallback;
+        if (typeof value === "object") return value;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return fallback;
+        }
+      };
+
+      setCustomerDetails(parseJson(fulfillment_data?.order?.customer, ""));
+      const trackInfo = parseJson(fulfillment_data?.track_info, []);
+      setTrackingInfo(Array.isArray(trackInfo) ? trackInfo : []);
+      setShippingAddress(parseJson(fulfillment_data?.order?.shipping_address, ""));
+      setLineItems(fulfillment_data?.order?.lineitems || []);
       setCarrierDetail(carrier_detail);
       // Create Date objects from the input strings
       const startDate = new Date(fulfillment_data?.first_date);

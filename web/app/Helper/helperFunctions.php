@@ -48,6 +48,49 @@ if (!function_exists('app_public_url')) {
     }
 }
 
+if (!function_exists('app_proxy_subpath')) {
+    /**
+     * Storefront app-proxy subpath.
+     * Prod default: track (never breaks live Modern URL).
+     * Local default: track-dev (avoids colliding with production proxy).
+     * Override: APP_PROXY_SUBPATH in .env
+     */
+    function app_proxy_subpath(): string
+    {
+        $configured = trim((string) env('APP_PROXY_SUBPATH', ''));
+        if ($configured !== '') {
+            return trim($configured, '/');
+        }
+
+        if (env('APP_ENV') === 'local') {
+            return 'track-dev';
+        }
+
+        return 'track';
+    }
+}
+
+if (!function_exists('app_proxy_modern_path')) {
+    /** e.g. /a/track/order or /a/track-dev/order */
+    function app_proxy_modern_path(): string
+    {
+        return '/a/' . app_proxy_subpath() . '/order';
+    }
+}
+
+if (!function_exists('app_proxy_modern_url')) {
+    function app_proxy_modern_url(string $shop, ?string $trackingNumber = null): string
+    {
+        $shop = preg_replace('#^https?://#i', '', rtrim($shop, '/'));
+        $url = 'https://' . $shop . app_proxy_modern_path();
+        if ($trackingNumber !== null && $trackingNumber !== '') {
+            $url .= '?tracking_number=' . urlencode($trackingNumber);
+        }
+
+        return $url;
+    }
+}
+
 if (!function_exists('billing_free_shops')) {
     /**
      * Shops that get full app access with no Shopify billing charges.

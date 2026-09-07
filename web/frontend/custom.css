@@ -49,61 +49,110 @@
 
 .OrderTable {
     width: 100%;
-    overflow-x: auto;
+    /* Scroll lives on Polaris ScrollContainer so scrollWidth includes all columns */
+    overflow: visible;
+}
+
+.OrderTable .Polaris-IndexTable {
+    overflow: visible !important;
+    max-width: none !important;
+}
+
+.OrderTable .Polaris-IndexTable__ScrollContainer {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    max-width: 100% !important;
+    /* Room so Order date can scroll fully into view */
+    padding-inline-end: 8px;
 }
 
 .OrderTable .Polaris-IndexTable__Table {
     table-layout: fixed;
-    width: 100%;
-    min-width: 900px;
+    /* 170+150+120+130+180+155+155 = 1060, plus end padding */
+    width: 1120px !important;
+    min-width: 1120px !important;
+    max-width: none !important;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading,
 .OrderTable .Polaris-IndexTable__TableCell {
-    padding: 0 var(--p-space-400);
+    padding: 0 var(--p-space-300);
     vertical-align: middle;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    box-sizing: border-box;
 }
 
-/* Fixed column widths — short or long values must not collapse/shift columns */
+/* selectable=false: col1=Order, col2=Tracking, ... */
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(1),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(1),
 .OrderTable .order_container {
-    width: 12%;
+    width: 170px;
+    min-width: 170px;
+    max-width: 170px;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(2),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(2),
 .OrderTable .tracking_container {
-    width: 16%;
+    width: 150px;
+    min-width: 150px;
+    max-width: 150px;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(3),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(3),
 .OrderTable .carrier_container {
-    width: 12%;
+    width: 120px;
+    min-width: 120px;
+    max-width: 120px;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(4),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(4),
 .OrderTable .status_container {
-    width: 14%;
+    width: 130px;
+    min-width: 130px;
+    max-width: 130px;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(5),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(5),
 .OrderTable .event_container {
-    width: 22%;
+    width: 180px;
+    min-width: 180px;
+    max-width: 180px;
 }
 
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(6),
-.OrderTable .Polaris-IndexTable__TableCell:nth-child(6),
+.OrderTable .Polaris-IndexTable__TableCell:nth-child(6) {
+    width: 155px;
+    min-width: 155px;
+    max-width: 155px;
+}
+
 .OrderTable .Polaris-IndexTable__TableHeading:nth-child(7),
 .OrderTable .Polaris-IndexTable__TableCell:nth-child(7),
 .OrderTable .date_container {
-    width: 12%;
+    width: 155px;
+    min-width: 155px;
+    max-width: 155px;
+}
+
+/* Extra end space so scrollbar can reach past Order date */
+.OrderTable .Polaris-IndexTable__TableHeading:last-child,
+.OrderTable .Polaris-IndexTable__TableCell:last-child {
+    padding-inline-end: 24px;
+}
+
+/* Only shrink inner content — do NOT override column min-width on cells */
+.OrderTable .order_container .TableCell__Content,
+.OrderTable .order_container .Polaris-LegacyStack,
+.OrderTable .order_container .Polaris-LegacyStack__Item {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .OrderTable .order-number-text,
@@ -116,6 +165,15 @@
     white-space: nowrap;
 }
 
+.OrderTable .order-number-text a,
+.OrderTable .tracking-number-text {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
 
 /* .OrderTable .tracking_container, .OrderTable .order_container {
     padding-left: 0!important;
@@ -125,6 +183,9 @@
 .OrderTable .Polaris-IndexTable__TableCell .TableCell__Content {
     display: flex;
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .OrderTable .tracking_container .row-show,
@@ -133,6 +194,9 @@
     z-index: 1; */
     /* height: 2.5rem; */
     display: flex;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .OrderTable .Polaris-IndexTable__TableRow--hovered .row-show {
@@ -154,6 +218,9 @@
     opacity: 1; */
     /* height: 2.5rem; */
     display: flex;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
     animation: mymove 5s infinite;
 }
 
