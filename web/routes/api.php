@@ -341,15 +341,16 @@ Route::post('/webhooks/product-delete', function (Request $request) {
 Route::post('/webhooks/fulfillment-create', function (Request $request) {
     try {
         $fulfillment_api = json_decode($request->getContent());
-
-        $shop = $request->header('x-shopify-shop-domain');
-        $shop = Session::where('shop', $shop)->first();
+        $shopDomain = $request->header('x-shopify-shop-domain');
+        if (!$shopDomain) {
+            return true;
+        }
 
 //        $msg = new ErrorMessage();
 //        $msg->message = "webhook fulfillment create api data: ".json_encode($fulfillment_api);
 //        $msg->save();
 
-        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shop)->onConnection("database");
+        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection("database");
 
 //        return true;
     } catch (Exception $exception) {
@@ -363,14 +364,15 @@ Route::post('/webhooks/fulfillment-create', function (Request $request) {
 Route::post('/webhooks/fulfillment-update', function (Request $request) {
     try {
         $fulfillment_api = json_decode($request->getContent());
-
-        $shop = $request->header('x-shopify-shop-domain');
-        $shop = Session::where('shop', $shop)->first();
+        $shopDomain = $request->header('x-shopify-shop-domain');
+        if (!$shopDomain) {
+            return true;
+        }
 
 //        $msg = new ErrorMessage();
 //        $msg->message = "webhook fulfillment update api data: " . json_encode($fulfillment_api);
 //        $msg->save();
-        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shop)->onConnection("database");
+        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection("database");
     } catch (Exception $exception) {
         $msg = new ErrorMessage();
         $msg->message = "Fulfillment create Webhook Exception: " . $exception->getMessage();

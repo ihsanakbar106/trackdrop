@@ -38,13 +38,17 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
      *
      * @return void
      */
-    public $shop;
+    /** @var string Shop domain — never pass Session model (SerializesModels + reinstall = ModelNotFoundException). */
+    public $shopDomain;
     public $fulfillment_api;
 
-    public function __construct($fulfillment_api, Session $shop)
+    public function __construct($fulfillment_api, $shopDomain)
     {
-        $this->shop = $shop;
         $this->fulfillment_api = $fulfillment_api;
+        // Accept domain string or legacy Session instance from older callers.
+        $this->shopDomain = is_object($shopDomain) && isset($shopDomain->shop)
+            ? (string) $shopDomain->shop
+            : (string) $shopDomain;
     }
 
     /**
@@ -56,7 +60,10 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
     {
         try {
             $fulfillment_api = $this->fulfillment_api;
-            $shop = $this->shop;
+            $shop = Session::where('shop', $this->shopDomain)->first();
+            if (!$shop) {
+                return;
+            }
 
             $sync_controller = new SyncController();
             $helper_controller = new HelperController();
@@ -110,22 +117,12 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                         if($track_shipping) {
                             $fulfillment->enable_tracking=1;
                             $fulfillment->save();
+                            // Keep Shopify carrier name; Track123 must not overwrite tracking_company.
                             $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
                             $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                             $carrier_status=json_decode(json_encode($carrier_status),false);
-                            if ($carrier_status->response === true || $carrier_status->response == "already exist") {
+                            if (is_object($carrier_status) && ($carrier_status->response === true || $carrier_status->response == "already exist")) {
 
-                                $fulfillment->tracking_company=$carrier_status->courier_code;
-                                $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
-                                $tracking_company_code="";
-                                if($tracking_company){
-                                    $tracking_company_code=$tracking_company->name;
-                                    $fulfillment->tracking_company=$tracking_company->name;
-                                } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
-                                    $tracking_company_code = 'Cargo';
-                                    $fulfillment->tracking_company = 'Cargo';
-                                }
-                                $fulfillment->save();
                                 if ($carrier_status->response === true && isset($shop)) {
                                     $get_shop->total_shipment_track=$get_shop->total_shipment_track+1;
                                     $get_shop->save();
@@ -142,7 +139,7 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                                 $shipping_status = $fulfillment_controller->shipping_status(
                                     $fulfillment_api->id,
                                     $fulfillment_api->tracking_number,
-                                    $tracking_company_code ?: $original_carrier,
+                                    $original_carrier,
                                     $shop
                                 );
 //                                $msg = new ErrorMessage();

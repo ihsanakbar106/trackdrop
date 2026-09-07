@@ -2,8 +2,9 @@
 
 namespace App\Jobs;
 
-use App\Http\Controllers\CollectionController;
+use App\Http\Controllers\PlanController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\SyncController;
 use App\Models\Session;
 use App\Models\Translation;
 use App\Services\ShopifyTokenService;
@@ -122,9 +123,37 @@ class afterAppInstallationJob implements ShouldQueue
                     "namespace" => "autotrack"
                 )
             ]);
-            $product_controller = new ProductController();
-            if (isset($session)) {
-                $product_controller->sync_products($session->shop, null);
+            // Products can fail without blocking order sync (install must still import orders).
+            try {
+                (new ProductController())->sync_products($session->shop, null);
+            } catch (\Throwable $e) {
+                \Log::error('afterAppInstallationJob product sync failed', [
+                    'shop' => $session_name,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            // Always queue 90-day order sync on install (plan not required).
+            $session = Session::where('shop', $session_name)->first();
+            if ($session) {
+                try {
+                    (new PlanController())->ensureBillingFreeShopPlan($session);
+                    $session->refresh();
+                } catch (\Throwable $e) {
+                    \Log::error('afterAppInstallationJob free plan ensure failed', [
+                        'shop' => $session_name,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                try {
+                    (new SyncController())->triggerInitialOrderSyncIfNeeded($session);
+                } catch (\Throwable $e) {
+                    \Log::error('afterAppInstallationJob order sync dispatch failed', [
+                        'shop' => $session_name,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
         }
 

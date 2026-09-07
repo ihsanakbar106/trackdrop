@@ -688,10 +688,13 @@ class FulfillmentController extends HelperController
 
     public function carrier_register_cargo($tracking_number)
     {
-        if (!$this->getCargoApiSetting()) {
+        // Docs require Bearer token + customer_code for Cargo shipment APIs.
+        $api_setting = $this->getCargoApiSetting();
+        if (!$api_setting || !$api_setting->api_key || !$api_setting->customer_code) {
             return [
                 'response' => false,
                 'courier_code' => '',
+                'message' => 'Cargo API requires api_key (Bearer token) and customer_code in api_settings.',
             ];
         }
 

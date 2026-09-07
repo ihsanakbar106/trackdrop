@@ -305,22 +305,12 @@ class SyncController extends HelperController
                                             if($track_shipping) {
                                                 $fulfillment->enable_tracking=1;
                                                 $fulfillment->save();
+                                                // Keep Shopify carrier name; Track123 must not overwrite tracking_company.
                                                 $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
                                                 $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                                                 $carrier_status=json_decode(json_encode($carrier_status),false);
-                                                if ($carrier_status->response === true || $carrier_status->response == "already exist") {
+                                                if (is_object($carrier_status) && ($carrier_status->response === true || $carrier_status->response == "already exist")) {
 
-                                                    $fulfillment->tracking_company=$carrier_status->courier_code;
-                                                    $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
-                                                    $tracking_company_code="";
-                                                    if($tracking_company){
-                                                        $tracking_company_code=$tracking_company->name;
-                                                        $fulfillment->tracking_company=$tracking_company->name;
-                                                    } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
-                                                        $tracking_company_code = 'Cargo';
-                                                        $fulfillment->tracking_company = 'Cargo';
-                                                    }
-                                                    $fulfillment->save();
                                                     if ($carrier_status->response === true && isset($shop)) {
                                                         $get_shop->total_shipment_track=$get_shop->total_shipment_track+1;
                                                         $get_shop->save();
@@ -333,7 +323,7 @@ class SyncController extends HelperController
                                                     $shipping_status = $fulfillment_controller->shipping_status(
                                                         $fulfillment_api->id,
                                                         $fulfillment_api->tracking_number,
-                                                        $tracking_company_code ?: $original_carrier,
+                                                        $original_carrier,
                                                         $shop
                                                     );
 
@@ -367,12 +357,12 @@ class SyncController extends HelperController
     }
 
     /**
-     * Queue a one-time last-90-days order sync when merchant opens billing or dashboard.
+     * Queue a one-time last-90-days order sync on app install only (plan not required).
      * Flag is set only after OrderSyncJob succeeds so a failed run can retry.
      */
     public function triggerInitialOrderSyncIfNeeded(Session $session): bool
     {
-        if (!$session || $session->initial_orders_synced_at || !$session->plan_id || (int) $session->plan_id === 1) {
+        if (!$session || $session->initial_orders_synced_at) {
             return false;
         }
 
@@ -1117,18 +1107,9 @@ QUERY;
                                                 $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
                                                 $carrier_status = json_decode(json_encode($carrier_status), false);
 //                                            dump($carrier_status);
-                                                if ($carrier_status->response === true || $carrier_status->response == "already exist") {
-                                                    $fulfillment->tracking_company = $carrier_status->courier_code;
-                                                    $tracking_company = Carrier::where('code', $carrier_status->courier_code)->first();
-
-                                                    if ($tracking_company) {
-                                                        $tracking_company_code = $tracking_company->name;
-                                                        $fulfillment->tracking_company = $tracking_company->name;
-                                                    } elseif ($fulfillment_controller->isCargoCarrier($original_carrier) || $fulfillment_controller->isCargoCarrier($carrier_status->courier_code)) {
-                                                        $tracking_company_code = 'Cargo';
-                                                        $fulfillment->tracking_company = 'Cargo';
-                                                    }
-                                                    $fulfillment->save();
+                                                if (is_object($carrier_status) && ($carrier_status->response === true || $carrier_status->response == "already exist")) {
+                                                    // Keep Shopify carrier name; do not overwrite from Track123.
+                                                    $tracking_company_code = $original_carrier;
                                                     if ($carrier_status->response === true && isset($shop)) {
 
                                                         $common_controller->api_statistics($order->session_id, $fulfillment->order_id, $fulfillment->fulfillment_id);
