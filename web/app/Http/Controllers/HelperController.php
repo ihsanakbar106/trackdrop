@@ -64,6 +64,11 @@ class HelperController extends Controller
         $options->setApiKey(env('SHOPIFY_API_KEY'));
         $options->setApiSecret(env('SHOPIFY_API_SECRET'));
         $options->setApiPassword((new ShopifyTokenService())->getValidAccessToken($shop_name));
+        // Default package timeout is 10s; large order pages (limit=250) often need longer.
+        $options->setGuzzleOptions([
+            'timeout' => 60.0,
+            'connect_timeout' => 15.0,
+        ]);
 
         $api = new BasicShopifyAPI($options);
         $api->setSession(new \Gnikyt\BasicShopifyAPI\Session($shop_name));

@@ -128,11 +128,11 @@ class PlanChargeStatus extends Command
                 $all_recurring_charge = json_decode(json_encode($all_recurring_charge), false);
                 $plan = Plan::where('name', $all_recurring_charge->name)->first();
                 array_push($existing_ids, $all_recurring_charge->id);
-                $charge = Charge::where('user_id', $user->id)->where('charge_id', $all_recurring_charge->id)->first();
+                $charge = Charge::where('session_id', $user->id)->where('charge_id', $all_recurring_charge->id)->first();
                 if ($charge == null) {
                     $charge = new Charge();
                 }
-                $charge->user_id = $user->id;
+                $charge->session_id = $user->id;
                 $charge->charge_id = $all_recurring_charge->id;
                 $charge->plan_id = $plan->id;
                 $charge->terms = $plan->terms;
@@ -153,14 +153,14 @@ class PlanChargeStatus extends Command
             }
 
 
-            $delete_non_existing_charges = Charge::where('user_id', $user->id)->whereNotIn('charge_id', $existing_ids)->get();
+            $delete_non_existing_charges = Charge::where('session_id', $user->id)->whereNotIn('charge_id', $existing_ids)->get();
             if ($delete_non_existing_charges->count()) {
                 foreach ($delete_non_existing_charges as $delete_non_existing) {
                     $delete_non_existing->delete();
                 }
             }
 
-            $active_charge = Charge::where('user_id', $user->id)->where('status','active')->orderBy('created_at', 'desc')->first();
+            $active_charge = Charge::where('session_id', $user->id)->where('status','active')->orderBy('created_at', 'desc')->first();
 //            dd($active_charge);
             if ((isset($active_charge) && ($active_charge->status == "ACTIVE" || $active_charge->status == "active")) ? true : false) { #if plan is active
                 $plan = Plan::find($active_charge->plan_id);

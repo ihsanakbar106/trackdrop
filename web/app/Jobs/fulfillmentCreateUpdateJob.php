@@ -107,12 +107,9 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                         $get_shop=Session::where('id',$shop->id)->first();
                         $c_date=Carbon::now();
                         $n_date=Carbon::parse($get_shop->created_at)->addDay(5);
-                        if (!$n_date->greaterThan($c_date)) {
-                            if($get_shop->total_shipment_track < 100){
-                                $track_shipping=1;
-                            }else{
-                                $track_shipping=0;
-                            }
+                        // After day 5: bonus tracking if under 100 pulls — do NOT force-off plan tracking.
+                        if (!$n_date->greaterThan($c_date) && $get_shop->total_shipment_track < 100) {
+                            $track_shipping=1;
                         }
                         if($track_shipping) {
                             $fulfillment->enable_tracking=1;

@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
 use App\Services\ShopifyTokenService;
+use App\Support\ShopSyncLock;
 use Mockery\Exception;
 use Shopify\Clients\Rest;
 
@@ -212,11 +213,49 @@ class SyncController extends HelperController
     }
 
     /**
+     * Same enable_tracking decision as sync_orders / webhooks (live counters).
+     * Used by phase-3 so fast-bulk cannot bypass plan / day-5 100-cap.
+     */
+    public function shouldAllowShipmentTracking(Session $shop, ?Plan $plan = null): bool
+    {
+        if (!$shop || !$shop->plan_id) {
+            return false;
+        }
+
+        $plan = $plan ?: Plan::where('id', $shop->plan_id)->first();
+        if (!$plan) {
+            return false;
+        }
+
+        $common_controller = new CommonController();
+        $total_req = $common_controller->get_api_statistics($shop);
+
+        $track_shipping = 0;
+        if ($plan->response_limit > $total_req) {
+            $track_shipping = 1;
+        } elseif ($total_req >= $plan->response_limit && $plan->id != 1) {
+            $track_shipping = 1;
+        }
+
+        $get_shop = Session::where('id', $shop->id)->first();
+        if ($get_shop) {
+            $c_date = Carbon::now();
+            $n_date = Carbon::parse($get_shop->created_at)->addDay(5);
+            // After day 5: bonus if under 100 lifetime pulls — never force-off plan-approved tracking.
+            if (!$n_date->greaterThan($c_date) && $get_shop->total_shipment_track < 100) {
+                $track_shipping = 1;
+            }
+        }
+
+        return (bool) $track_shipping;
+    }
+
+    /**
      * During bulk OrderSyncJob, skip carrier API only for already-delivered rows.
      * Active statuses (pending/transit/out for delivery/…) still refresh — same as before.
      * Removes only the expensive re-pull of delivered history (plus we no longer double-call updateCarrier).
      */
-    protected function fulfillmentNeedsTrackingPull($fulfillment): bool
+    public function fulfillmentNeedsTrackingPull($fulfillment): bool
     {
         if (!$fulfillment || empty($fulfillment->tracking_number)) {
             return false;
@@ -234,8 +273,109 @@ class SyncController extends HelperController
         return true;
     }
 
-    public function sync_orders($shop_name, $specificDate = 'Last 30 days')
-    {
+    /**
+     * Single-fulfillment Cargo / Track123 pull — same business rules as the sync_orders carrier block.
+     * Expects enable_tracking already decided/set by the caller.
+     */
+    public function pullCarrierTrackingForFulfillment(
+        Fulfillment $fulfillment,
+        Session $shop,
+        ?Plan $plan = null,
+        $trackingCompanyOverride = null
+    ): bool {
+        if (!$this->fulfillmentNeedsTrackingPull($fulfillment)) {
+            return false;
+        }
+        if (!$shop || !$shop->plan_id) {
+            return false;
+        }
+
+        $plan = $plan ?: Plan::where('id', $shop->plan_id)->first();
+        if (!$plan) {
+            return false;
+        }
+
+        $dbOrder = Order::where('session_id', $shop->id)
+            ->where('shopify_order_id', $fulfillment->shopify_order_id)
+            ->first();
+        if (!$dbOrder) {
+            return false;
+        }
+
+        $country = null;
+        if (json_decode($dbOrder->shipping_address) != '' && json_decode($dbOrder->shipping_address) != null) {
+            $shipp_add = json_decode($dbOrder->shipping_address);
+            $country = $shipp_add->country;
+        } elseif (json_decode($dbOrder->billing_address) != '' && json_decode($dbOrder->billing_address) != null) {
+            $bill_add = json_decode($dbOrder->billing_address);
+            $country = $bill_add->country;
+        }
+
+        $common_controller = new CommonController();
+        $fulfillment_controller = new FulfillmentController();
+        $total_req = $common_controller->get_api_statistics($shop);
+
+        $add_usagecharges = 0;
+        if (!($plan->response_limit > $total_req) && $total_req >= $plan->response_limit && $plan->id != 1) {
+            $add_usagecharges = 1;
+        }
+
+        $get_shop = Session::where('id', $shop->id)->first();
+        $original_carrier = $trackingCompanyOverride ?? $fulfillment->tracking_company;
+
+        $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
+        $carrier_status = json_decode(json_encode($carrier_status), false);
+
+        if (!is_object($carrier_status) || ($carrier_status->response !== true && $carrier_status->response != 'already exist')) {
+            return false;
+        }
+
+        if ($carrier_status->response === true && $get_shop) {
+            $get_shop->total_shipment_track = $get_shop->total_shipment_track + 1;
+            $get_shop->save();
+            $common_controller->api_statistics($dbOrder->session_id, $fulfillment->order_id, $fulfillment->fulfillment_id);
+            if ($add_usagecharges || $plan->unlimited) {
+                $fulfillment_controller->add_usage_charge($shop->shop, $plan);
+            }
+        }
+
+        $shipping_status = $fulfillment_controller->shipping_status(
+            $fulfillment->fulfillment_id,
+            $fulfillment->tracking_number,
+            $original_carrier,
+            $shop
+        );
+
+        if ($shipping_status != false) {
+            $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment, $shop, $country);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  bool  $fastBulk  OrderSyncJob path: skip per-order GraphQL/REST extras (images, fulfillment_order ids).
+     *                          After sync: SyncMissingLineItemImagesJob → SyncFulfillmentTrackingJob.
+     * @param  string|null  $createdAtMin  ISO8601 override (monthly chunks for Last 90 days).
+     * @param  string|null  $createdAtMax  ISO8601 upper bound (exclusive window end for older months).
+     */
+    public function sync_orders(
+        $shop_name,
+        $specificDate = 'Last 30 days',
+        bool $fastBulk = false,
+        ?string $createdAtMin = null,
+        ?string $createdAtMax = null
+    ) {
+        $startedAt = microtime(true);
+        $page = 0;
+        $ordersProcessed = 0;
+        $fulfillmentsSaved = 0;
+        $trackingEnabled = 0;
+        $carrierPulled = 0;
+        $lastOrderName = null;
+        $lastOrderId = null;
+
         try {
             $shop = Session::where('shop', $shop_name)->first();
             if (!$shop) {
@@ -245,129 +385,178 @@ class SyncController extends HelperController
             $common_controller = new CommonController();
             $plan = $shop->plan_id ? Plan::where('id', $shop->plan_id)->first() : null;
 
-            $days = null;
-            if (isset($specificDate) && $specificDate != "") {
-                if ($specificDate == 'Today') {
-                    $days = date('c');
-                } elseif ($specificDate == 'Last 7 days') {
-                    $days = date('c', strtotime('-7 days'));
-                } elseif ($specificDate == 'Last 15 days') {
-                    $days = date('c', strtotime('-15 days'));
-                } elseif ($specificDate == 'Last 30 days') {
-                    $days = date('c', strtotime('-30 days'));
-                } elseif ($specificDate == 'Last 60 days') {
-                    $days = date('c', strtotime('-60 days'));
-                } elseif ($specificDate == 'Last 90 days') {
-                    $days = date('c', strtotime('-90 days'));
-                }
+            if ($createdAtMin) {
+                $days = $createdAtMin;
             } else {
-                $days = date('c', strtotime('-30 days'));
+                $days = null;
+                if (isset($specificDate) && $specificDate != "") {
+                    if ($specificDate == 'Today') {
+                        $days = date('c');
+                    } elseif ($specificDate == 'Last 7 days') {
+                        $days = date('c', strtotime('-7 days'));
+                    } elseif ($specificDate == 'Last 15 days') {
+                        $days = date('c', strtotime('-15 days'));
+                    } elseif ($specificDate == 'Last 30 days') {
+                        $days = date('c', strtotime('-30 days'));
+                    } elseif ($specificDate == 'Last 60 days') {
+                        $days = date('c', strtotime('-60 days'));
+                    } elseif ($specificDate == 'Last 90 days') {
+                        $days = date('c', strtotime('-90 days'));
+                    }
+                } else {
+                    $days = date('c', strtotime('-30 days'));
+                }
             }
 
+            $this->writeSyncOrdersProgress($shop_name, [
+                'phase' => 'started',
+                'fastBulk' => $fastBulk,
+                'specificDate' => $specificDate,
+                'created_at_min' => $days,
+                'created_at_max' => $createdAtMax,
+                'page' => 0,
+                'ordersProcessed' => 0,
+            ], $startedAt);
 
             $sync_controller = new SyncController();
             $next_page = '';
             $completedWithoutApiError = true;
+            $orderErrors = 0;
+            $pageFetchGaveUp = false;
 
             do {
+                    $page++;
                     if ($next_page === '') {
                         $params = ['limit' => 250, 'status' => 'any', 'created_at_min' => $days];
+                        if ($createdAtMax) {
+                            $params['created_at_max'] = $createdAtMax;
+                        }
                     } else {
                         $params = ['limit' => 250, 'page_info' => $next_page];
                     }
 
-                    $order_api = $this->getShopApi($shop->shop)->rest('get', '/admin/orders', $params);
+                    // Never throw out of the page loop — one bad page must not abort already-imported orders / phase 2–3.
+                    $order_api = $this->fetchShopifyOrdersPage($shop->shop, $params, $shop_name, $page);
+                    if ($order_api === null) {
+                        $completedWithoutApiError = false;
+                        $pageFetchGaveUp = true;
+                        $this->writeSyncOrdersProgress($shop_name, [
+                            'phase' => 'page_fetch_gave_up',
+                            'fastBulk' => $fastBulk,
+                            'specificDate' => $specificDate,
+                            'page' => $page,
+                            'ordersProcessed' => $ordersProcessed,
+                            'lastOrderName' => $lastOrderName,
+                            'lastOrderId' => $lastOrderId,
+                            'note' => 'Stopped pagination here; already-imported orders kept. Pipeline may still continue.',
+                        ], $startedAt);
+                        break;
+                    }
 
                     if ($order_api['errors'] !== false) {
                         $completedWithoutApiError = false;
+                        $this->writeSyncOrdersProgress($shop_name, [
+                            'phase' => 'shopify_api_error',
+                            'fastBulk' => $fastBulk,
+                            'specificDate' => $specificDate,
+                            'page' => $page,
+                            'ordersProcessed' => $ordersProcessed,
+                            'lastOrderName' => $lastOrderName,
+                            'lastOrderId' => $lastOrderId,
+                        ], $startedAt);
                         break;
                     }
 
                     $orders = $order_api['body']['orders'] ?? [];
+                    $pageOrderCount = is_countable($orders) ? count($orders) : 0;
+
                     if (!empty($orders)) {
                         foreach ($orders as $order) {
-                            $sync_controller->createUpdateOrder($order, $shop);
-                            if (!empty($order['fulfillments'])) {
-                                foreach ($order['fulfillments'] as $fulfillment_api) {
-                                    $fulfillment_api = json_decode(json_encode($fulfillment_api), false);
-                                    $sync_controller->createUpdateFufillment($fulfillment_api, $shop);
-                                    if (isset($fulfillment_api) && isset($fulfillment_api->tracking_company) && $shop && $shop->plan_id && $plan) {
-                                        $fulfillment = Fulfillment::with('order')->where('fulfillment_id', $fulfillment_api->id)->first();
-                                        $dbOrder = $fulfillment?->order;
-                                        if (isset($fulfillment) && isset($dbOrder)) {
-                                            $country = null;
-                                            if (json_decode($dbOrder->shipping_address) != '' && json_decode($dbOrder->shipping_address) != null) {
-                                                $shipp_add = json_decode($dbOrder->shipping_address);
-                                                $country = $shipp_add->country;
-                                            } elseif (json_decode($dbOrder->billing_address) != '' && json_decode($dbOrder->billing_address) != null) {
-                                                $bill_add = json_decode($dbOrder->billing_address);
-                                                $country = $bill_add->country;
-                                            }
-                                            $total_req = $common_controller->get_api_statistics($shop);
+                            try {
+                                $lastOrderId = data_get($order, 'id');
+                                $lastOrderName = data_get($order, 'name');
 
-                                            $track_shipping = 0;
-                                            $add_usagecharges = 0;
-                                            if ($plan->response_limit > $total_req) {
-                                                $track_shipping = 1;
-                                            } elseif ($total_req >= $plan->response_limit && $plan->id != 1) {
-                                                $track_shipping = 1;
-                                                $add_usagecharges = 1;
-                                            }
-                                            $get_shop = Session::where('id', $shop->id)->first();
-                                            $c_date = Carbon::now();
-                                            $n_date = Carbon::parse($get_shop->created_at)->addDay(5);
-                                            if (!$n_date->greaterThan($c_date)) {
-                                                if ($get_shop->total_shipment_track < 100) {
-                                                    $track_shipping = 1;
-                                                } else {
-                                                    $track_shipping = 0;
-                                                }
-                                            }
-                                            if ($track_shipping) {
-                                                $fulfillment->enable_tracking = 1;
-                                                $fulfillment->save();
+                                // Fast bulk: DB import only — no per-order GraphQL image / fulfillment_order calls.
+                                $sync_controller->createUpdateOrder($order, $shop, !$fastBulk);
+                                $ordersProcessed++;
 
-                                                // Delivered+track_info: skip carrier APIs (same idea as other refresh jobs).
-                                                if (!$this->fulfillmentNeedsTrackingPull($fulfillment)) {
-                                                    continue;
-                                                }
+                                if (!empty($order['fulfillments'])) {
+                                    foreach ($order['fulfillments'] as $fulfillment_api) {
+                                        try {
+                                            $fulfillment_api = json_decode(json_encode($fulfillment_api), false);
+                                            $sync_controller->createUpdateFufillment($fulfillment_api, $shop);
+                                            $fulfillmentsSaved++;
+                                            if (isset($fulfillment_api) && isset($fulfillment_api->tracking_company) && $shop && $shop->plan_id && $plan) {
+                                                $fulfillment = Fulfillment::where('session_id', $shop->id)
+                                                    ->where('fulfillment_id', $fulfillment_api->id)
+                                                    ->first();
+                                                if (isset($fulfillment)) {
+                                                    if ($this->shouldAllowShipmentTracking($shop, $plan)) {
+                                                        $fulfillment->enable_tracking = 1;
+                                                        $fulfillment->save();
+                                                        $trackingEnabled++;
 
-                                                // Keep Shopify carrier name; Track123 must not overwrite tracking_company.
-                                                $original_carrier = $fulfillment_api->tracking_company ?? $fulfillment->tracking_company;
-                                                $carrier_status = $fulfillment_controller->carrier_register($fulfillment->tracking_number, $original_carrier);
-                                                $carrier_status = json_decode(json_encode($carrier_status), false);
-                                                if (is_object($carrier_status) && ($carrier_status->response === true || $carrier_status->response == "already exist")) {
-
-                                                    if ($carrier_status->response === true && isset($shop)) {
-                                                        $get_shop->total_shipment_track = $get_shop->total_shipment_track + 1;
-                                                        $get_shop->save();
-                                                        $common_controller->api_statistics($dbOrder->session_id, $fulfillment->order_id, $fulfillment->fulfillment_id);
-                                                        if ($add_usagecharges || $plan->unlimited) {
-                                                            $fulfillment_controller->add_usage_charge($shop->shop, $plan);
+                                                        // Fast bulk: carrier pulls deferred to SyncFulfillmentTrackingJob (phase 3).
+                                                        if ($fastBulk) {
+                                                            continue;
                                                         }
 
+                                                        if ($this->pullCarrierTrackingForFulfillment(
+                                                            $fulfillment,
+                                                            $shop,
+                                                            $plan,
+                                                            $fulfillment_api->tracking_company ?? $fulfillment->tracking_company
+                                                        )) {
+                                                            $carrierPulled++;
+                                                        }
                                                     }
-                                                    $shipping_status = $fulfillment_controller->shipping_status(
-                                                        $fulfillment_api->id,
-                                                        $fulfillment_api->tracking_number,
-                                                        $original_carrier,
-                                                        $shop
-                                                    );
 
-                                                    if ($shipping_status != false) {
-                                                        // Do NOT call updateCarrier here — it repeats shipping_status for the same order.
-                                                        $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment, $shop, $country);
-                                                    }
                                                 }
                                             }
-
+                                        } catch (\Throwable $fulfillmentEx) {
+                                            $orderErrors++;
                                         }
                                     }
-
                                 }
+
+                                // Heartbeat every 25 orders so timeout leaves a clear "last seen" breadcrumb.
+                                if ($ordersProcessed % 25 === 0) {
+                                    $this->writeSyncOrdersProgress($shop_name, [
+                                        'phase' => 'importing',
+                                        'fastBulk' => $fastBulk,
+                                        'specificDate' => $specificDate,
+                                        'page' => $page,
+                                        'ordersProcessed' => $ordersProcessed,
+                                        'fulfillmentsSaved' => $fulfillmentsSaved,
+                                        'trackingEnabled' => $trackingEnabled,
+                                        'carrierPulled' => $carrierPulled,
+                                        'orderErrors' => $orderErrors,
+                                        'lastOrderName' => $lastOrderName,
+                                        'lastOrderId' => $lastOrderId,
+                                    ], $startedAt);
+                                }
+                            } catch (\Throwable $orderEx) {
+                                $orderErrors++;
+                                $completedWithoutApiError = false;
                             }
                         }
                     }
+
+                    $this->writeSyncOrdersProgress($shop_name, [
+                        'phase' => 'page_done',
+                        'fastBulk' => $fastBulk,
+                        'specificDate' => $specificDate,
+                        'page' => $page,
+                        'pageOrderCount' => $pageOrderCount,
+                        'ordersProcessed' => $ordersProcessed,
+                        'fulfillmentsSaved' => $fulfillmentsSaved,
+                        'trackingEnabled' => $trackingEnabled,
+                        'carrierPulled' => $carrierPulled,
+                        'orderErrors' => $orderErrors,
+                        'lastOrderName' => $lastOrderName,
+                        'lastOrderId' => $lastOrderId,
+                        'has_next_page' => !empty($order_api['link']['next']),
+                    ], $startedAt);
 
                     if (!empty($order_api['link']['next'])) {
                         $next_page = $order_api['link']['next'];
@@ -376,15 +565,111 @@ class SyncController extends HelperController
                     }
                 } while ($next_page);
 
-            return $completedWithoutApiError;
-        } catch (\Exception $e) {
-            \Log::error('sync_orders failed', [
-                'shop' => $shop_name,
+            // Partial success is still OK for pipeline: imported rows stay; phase 2/3 + next month should run.
+            $pipelineOk = $ordersProcessed > 0 || $completedWithoutApiError;
+            $finalPhase = $pageFetchGaveUp
+                ? 'completed_partial_page_stopped'
+                : ($completedWithoutApiError ? 'completed_ok' : 'completed_with_errors');
+            $this->writeSyncOrdersProgress($shop_name, [
+                'phase' => $finalPhase,
+                'fastBulk' => $fastBulk,
                 'specificDate' => $specificDate,
+                'page' => $page,
+                'ordersProcessed' => $ordersProcessed,
+                'fulfillmentsSaved' => $fulfillmentsSaved,
+                'trackingEnabled' => $trackingEnabled,
+                'carrierPulled' => $carrierPulled,
+                'orderErrors' => $orderErrors,
+                'pageFetchGaveUp' => $pageFetchGaveUp,
+                'lastOrderName' => $lastOrderName,
+                'lastOrderId' => $lastOrderId,
+                'pipelineOk' => $pipelineOk,
+            ], $startedAt);
+
+            return $pipelineOk;
+        } catch (\Throwable $e) {
+            // Unexpected fatal: still allow phase 2/3 if we already imported anything.
+            $pipelineOk = $ordersProcessed > 0;
+            $this->writeSyncOrdersProgress($shop_name, [
+                'phase' => 'exception',
+                'fastBulk' => $fastBulk,
+                'specificDate' => $specificDate,
+                'page' => $page,
+                'ordersProcessed' => $ordersProcessed,
+                'lastOrderName' => $lastOrderName,
+                'lastOrderId' => $lastOrderId,
                 'error' => $e->getMessage(),
-            ]);
-            return false;
+                'pipelineOk' => $pipelineOk,
+            ], $startedAt);
+            return $pipelineOk;
         }
+    }
+
+    /**
+     * Fetch one Shopify orders page with retries. Returns null only after giving up
+     * (caller should stop pagination, not abort the whole job pipeline).
+     */
+    protected function fetchShopifyOrdersPage(string $shopDomain, array $params, string $shopName, int $page): ?array
+    {
+        $maxFetchAttempts = 4;
+
+        for ($attempt = 1; $attempt <= $maxFetchAttempts; $attempt++) {
+            try {
+                $order_api = $this->getShopApi($shopDomain)->rest('get', '/admin/orders', $params);
+
+                // Retry transient Shopify API errors (timeout body / 429 / 5xx-ish messages).
+                if ($order_api['errors'] !== false) {
+                    $errStr = is_string($order_api['errors'])
+                        ? $order_api['errors']
+                        : json_encode($order_api['errors']);
+                    $retryable = $this->isRetryableShopifyError($errStr);
+                    if ($retryable && $attempt < $maxFetchAttempts) {
+                        sleep(min(5 * $attempt, 20));
+                        continue;
+                    }
+                }
+
+                return $order_api;
+            } catch (\Throwable $fetchEx) {
+                $retryable = $this->isRetryableShopifyError($fetchEx->getMessage());
+                if (!$retryable || $attempt >= $maxFetchAttempts) {
+                    break;
+                }
+                sleep(min(5 * $attempt, 20));
+            }
+        }
+
+        return null;
+    }
+
+    protected function isRetryableShopifyError(string $message): bool
+    {
+        $m = strtolower($message);
+        return str_contains($m, 'curl error 28')
+            || str_contains($m, 'operation timed out')
+            || str_contains($m, 'timed out')
+            || str_contains($m, 'connection reset')
+            || str_contains($m, 'connection timed out')
+            || str_contains($m, 'errno 28')
+            || str_contains($m, '429')
+            || str_contains($m, 'too many requests')
+            || str_contains($m, '503')
+            || str_contains($m, '502')
+            || str_contains($m, '504')
+            || str_contains($m, 'server error');
+    }
+
+    /**
+     * Persist sync progress so a worker timeout still leaves the last known position.
+     */
+    protected function writeSyncOrdersProgress(string $shopName, array $data, float $startedAt): void
+    {
+        $payload = array_merge($data, [
+            'shop' => $shopName,
+            'elapsed_sec' => round(microtime(true) - $startedAt, 1),
+            'updated_at' => now()->toDateTimeString(),
+        ]);
+        Cache::put('sync_orders_progress:' . $shopName, $payload, now()->addHours(12));
     }
 
     /**
@@ -394,6 +679,10 @@ class SyncController extends HelperController
     public function triggerInitialOrderSyncIfNeeded(Session $session): bool
     {
         if (!$session || $session->initial_orders_synced_at) {
+            return false;
+        }
+
+        if (ShopSyncLock::isLocked($session->shop)) {
             return false;
         }
 
@@ -415,6 +704,13 @@ class SyncController extends HelperController
         try {
 //            CreateUpdateManualOrderJob::dispatch($request['shop'],$request['specific_date])->onConnection("database");
 //            $this->sync_orders($session->shop, $request->specific_date);
+            if (ShopSyncLock::isLocked($session->shop)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'A sync is already running for this shop. Please wait until it finishes.',
+                ]);
+            }
+
             OrderSyncJob::dispatch($session->shop, $request->specific_date)->onConnection('database');
             $data = [
                 'status' => 'success',
@@ -429,7 +725,7 @@ class SyncController extends HelperController
         return response()->json($data);
     }
 
-    public function createUpdateOrder($order, $shop)
+    public function createUpdateOrder($order, $shop, bool $syncExtras = true)
     {
         try {
 
@@ -470,7 +766,8 @@ class SyncController extends HelperController
                 'billing_address' => $billing_address ? json_encode($billing_address) : null,
             ]);
 
-            if (is_null($order->location_id)) {
+            // Fast bulk OrderSync skips this — per-order locations.json was a major timeout contributor.
+            if (is_null($order->location_id) && $syncExtras) {
                 $client = new Rest($shop->shop, (new ShopifyTokenService())->getValidAccessToken($shop->shop));
                 $locations_response = $client->get('locations.json', []);
                 $locations = $locations_response->getDecodedBody()['locations'] ? $locations_response->getDecodedBody()['locations'] : [];
@@ -510,8 +807,11 @@ class SyncController extends HelperController
             }
 
 
-            $this->sync_lineitem_images($order, $shop);
-            $this->sync_fulfillment_order_ids($order_data, $shop);
+            // Per-order GraphQL + fulfillment_orders REST — skip on fast bulk OrderSyncJob.
+            if ($syncExtras) {
+                $this->sync_lineitem_images($order, $shop);
+                $this->sync_fulfillment_order_ids($order_data, $shop);
+            }
 
         } catch (\Exception $exception) {
 //            dd('Error in function createUpdateOrder: ', $exception->getMessage());
@@ -549,8 +849,11 @@ QUERY;
                 foreach ($lineitems as $lineitem) {
                     $db_lineitem = LineItem::where('shopify_lineitem_id', intval(str_replace("gid://shopify/LineItem/", "", $lineitem->id)))->first();
                     if (isset($db_lineitem)) {
-                        $db_lineitem->image = isset($lineitem) && isset($lineitem->image) && isset($lineitem->image->url) ? $lineitem->image->url : null;
-                        $db_lineitem->save();
+                        // Never wipe a good image when GraphQL returns no image node.
+                        if (isset($lineitem->image) && isset($lineitem->image->url) && $lineitem->image->url) {
+                            $db_lineitem->image = $lineitem->image->url;
+                            $db_lineitem->save();
+                        }
                     }
                 }
             }
