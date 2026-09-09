@@ -25,6 +25,7 @@ use DateTime;
 use GuzzleHttp\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
@@ -2065,28 +2066,109 @@ class FulfillmentController extends HelperController
         ]);
 
     }
+    /**
+     * Translate with cache. Same EN phrase → same target language = one API hit, then reuse.
+     */
     public function translateText($text, $targetLanguage)
     {
-        $tr = new GoogleTranslate($targetLanguage); // Target language
-        $tr->setSource('en'); // Source language (optional)
-        return $tr->translate($text);
-        return $text;
-    }
-    function translateTrackInfo($jsonString, $targetLang = 'he') {
-        // Initialize Google Translate
-        $translator = new GoogleTranslate($targetLang);
-
-        // Decode the JSON string into an array
-        $data = json_decode($jsonString, true);
-
-        // Iterate over each object in the array
-        foreach ($data as &$checkpoint) {
-            $checkpoint['checkpoint_delivery_status'] = $translator->translate($checkpoint['checkpoint_delivery_status']);
-            $checkpoint['tracking_detail'] = $translator->translate($checkpoint['tracking_detail']);
+        if ($text === null || $text === '' || $targetLanguage === 'en') {
+            return $text;
         }
 
-        // Encode the translated array back into JSON
-        return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $original = (string) $text;
+        $normalized = mb_strtolower(trim($original));
+        $cacheKey = 'gtr:' . md5($normalized . '|' . $targetLanguage);
+
+        $cached = Cache::get($cacheKey);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
+        // Prefill common tracking phrases (fast path, no Google call).
+        $static = $this->staticTrackingTranslations($targetLanguage);
+        if (isset($static[$normalized])) {
+            Cache::put($cacheKey, $static[$normalized], now()->addDays(30));
+            return $static[$normalized];
+        }
+
+        try {
+            $tr = new GoogleTranslate($targetLanguage);
+            $tr->setSource('en');
+            $translated = $tr->translate($original);
+            if (is_string($translated) && $translated !== '') {
+                Cache::put($cacheKey, $translated, now()->addDays(30));
+                return $translated;
+            }
+        } catch (\Throwable $e) {
+            // Rate limit / network — keep English so tracking page never breaks.
+        }
+
+        return $original;
+    }
+
+    function translateTrackInfo($jsonString, $targetLang = 'he')
+    {
+        if ($jsonString === null || $jsonString === '' || $targetLang === 'en') {
+            return $jsonString;
+        }
+
+        try {
+            $data = json_decode($jsonString, true);
+            if (!is_array($data)) {
+                return $jsonString;
+            }
+
+            foreach ($data as &$checkpoint) {
+                if (!is_array($checkpoint)) {
+                    continue;
+                }
+                if (!empty($checkpoint['checkpoint_delivery_status'])) {
+                    $checkpoint['checkpoint_delivery_status'] = $this->translateText(
+                        $checkpoint['checkpoint_delivery_status'],
+                        $targetLang
+                    );
+                }
+                if (!empty($checkpoint['tracking_detail'])) {
+                    $checkpoint['tracking_detail'] = $this->translateText(
+                        $checkpoint['tracking_detail'],
+                        $targetLang
+                    );
+                }
+            }
+
+            return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            return $jsonString;
+        }
+    }
+
+    /**
+     * Common carrier status lines — shown immediately from cache without Google.
+     * Keys must be lowercase.
+     */
+    protected function staticTrackingTranslations(string $targetLang): array
+    {
+        if ($targetLang !== 'he') {
+            return [];
+        }
+
+        return [
+            'transit' => 'במעבר',
+            'pending' => 'ממתין',
+            'delivered' => 'נמסר',
+            'pickup' => 'איסוף',
+            'expired' => 'פג תוקף',
+            'exception' => 'חריגה',
+            'out for delivery' => 'בדרך למסירה',
+            'info received' => 'התקבל מידע',
+            'in transit' => 'במעבר',
+            'the package has been sent out' => 'החבילה נשלחה',
+            'the package has arrived at the operation center' => 'החבילה הגיעה למרכז התפעול',
+            'the package leaves the operation center' => 'החבילה יצאה ממרכז התפעול',
+            'the electronic information of the package has been received' => 'המידע האלקטרוני של החבילה התקבל',
+            'shenzhen, the package leaves the operation center' => 'שנזן, החבילה יצאה ממרכז התפעול',
+            'shenzhen, the package has arrived at the operation center' => 'שנזן, החבילה הגיעה למרכז התפעול',
+        ];
     }
     public function search_tracking_number(Request $request)
     {
@@ -2206,8 +2288,12 @@ class FulfillmentController extends HelperController
                         if($fulfillments[0]->track_info ){
                             if($translation_code !="en") {
                                 foreach ($fulfillments as &$fulfill) {
-                                $fulfill->shipment_status_t=$this->translateText($fulfill->shipment_status,$translation_code);
-                                    $fulfill->track_info = $this->translateTrackInfo($fulfill->track_info, $translation_code);
+                                    try {
+                                        $fulfill->shipment_status_t = $this->translateText($fulfill->shipment_status, $translation_code);
+                                        $fulfill->track_info = $this->translateTrackInfo($fulfill->track_info, $translation_code);
+                                    } catch (\Throwable $e) {
+                                        // Translation failed — keep original English on the page.
+                                    }
                                 }
                             }
 //                        if($fulfillments[0]->track_info && !empty($fulfillments[0]->track_info) && ($fulfillments[0]->track_info) !="[]"){
