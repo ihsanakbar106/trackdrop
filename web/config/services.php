@@ -30,4 +30,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    | Official Google Cloud Translation API (Basic v2) — tracking page statuses.
+    | Free tier ~500k chars/month. Enable "Cloud Translation API" in Google Cloud Console.
+    | Set GOOGLE_TRANSLATE_API_KEY in .env (never commit the real key).
+    */
+    'google_translate' => [
+        'key' => env('GOOGLE_TRANSLATE_API_KEY'),
+    ],
+
 ];

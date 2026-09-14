@@ -27,13 +27,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redirect;
+use App\Services\GoogleCloudTranslationService;
 use App\Services\ShopifyTokenService;
 use Mockery\Exception;
 use Shopify\Clients\Graphql;
 use Shopify\Clients\Rest;
-use Stichoza\GoogleTranslate\GoogleTranslate;
 
 class FulfillmentController extends HelperController
 {
@@ -2068,42 +2069,91 @@ class FulfillmentController extends HelperController
     }
     /**
      * Translate with cache. Same EN phrase → same target language = one API hit, then reuse.
+     * Uses official Google Cloud Translation API; falls back to English on failure.
+     * Success always stored in cache (30 days) to minimise API / 429 risk.
      */
     public function translateText($text, $targetLanguage)
     {
-        if ($text === null || $text === '' || $targetLanguage === 'en') {
-            return $text;
-        }
-
-        $original = (string) $text;
-        $normalized = mb_strtolower(trim($original));
-        $cacheKey = 'gtr:' . md5($normalized . '|' . $targetLanguage);
-
-        $cached = Cache::get($cacheKey);
-        if (is_string($cached) && $cached !== '') {
-            return $cached;
-        }
-
-        // Prefill common tracking phrases (fast path, no Google call).
-        $static = $this->staticTrackingTranslations($targetLanguage);
-        if (isset($static[$normalized])) {
-            Cache::put($cacheKey, $static[$normalized], now()->addDays(30));
-            return $static[$normalized];
-        }
-
         try {
-            $tr = new GoogleTranslate($targetLanguage);
-            $tr->setSource('en');
-            $translated = $tr->translate($original);
-            if (is_string($translated) && $translated !== '') {
+            if ($text === null || $text === '') {
+                return $text;
+            }
+
+            $targetLanguage = strtolower(trim((string) $targetLanguage));
+            if ($targetLanguage === '' || $targetLanguage === 'en') {
+                return $text;
+            }
+
+            $original = (string) $text;
+            $normalized = mb_strtolower(trim($original));
+            $cacheKey = 'gtr:' . md5($normalized . '|' . $targetLanguage);
+            $preview = mb_substr($original, 0, 80);
+
+            // 1) Laravel cache — no API
+            $cached = Cache::get($cacheKey);
+            if (is_string($cached) && $cached !== '') {
+                Log::info('translateText: source=cache', [
+                    'lang' => $targetLanguage,
+                    'text' => $preview,
+                    'translated' => mb_substr($cached, 0, 80),
+                ]);
+                return $cached;
+            }
+
+            // 2) Static map — store into cache, no API
+            $static = $this->staticTrackingTranslations($targetLanguage);
+            if (isset($static[$normalized])) {
+                $translated = $static[$normalized];
                 Cache::put($cacheKey, $translated, now()->addDays(30));
+                Log::info('translateText: source=static_map', [
+                    'lang' => $targetLanguage,
+                    'text' => $preview,
+                    'translated' => mb_substr($translated, 0, 80),
+                ]);
                 return $translated;
             }
-        } catch (\Throwable $e) {
-            // Rate limit / network — keep English so tracking page never breaks.
-        }
 
-        return $original;
+            // No key configured → English, never call API / never error the page.
+            if (empty(config('services.google_translate.key'))) {
+                Log::warning('translateText: source=fallback_english (missing GOOGLE_TRANSLATE_API_KEY)', [
+                    'lang' => $targetLanguage,
+                    'text' => $preview,
+                ]);
+                return $original;
+            }
+
+            // 3) Google Cloud Translation API — only if not in cooldown after a prior 429
+            if (Cache::has(GoogleCloudTranslationService::COOLDOWN_CACHE_KEY)) {
+                Log::warning('translateText: source=fallback_english (429 cooldown)', [
+                    'lang' => $targetLanguage,
+                    'text' => $preview,
+                ]);
+                return $original;
+            }
+
+            $translated = (new GoogleCloudTranslationService())->translate($original, $targetLanguage, 'en');
+            if (is_string($translated) && $translated !== '') {
+                Cache::put($cacheKey, $translated, now()->addDays(30));
+                Log::info('translateText: source=google_translate_api', [
+                    'lang' => $targetLanguage,
+                    'text' => $preview,
+                    'translated' => mb_substr($translated, 0, 80),
+                    'cached_days' => 30,
+                ]);
+                return $translated;
+            }
+
+            Log::warning('translateText: source=fallback_english (translate api empty/fail)', [
+                'lang' => $targetLanguage,
+                'text' => $preview,
+            ]);
+            return $original;
+        } catch (\Throwable $e) {
+            Log::warning('translateText: source=fallback_english (exception)', [
+                'error' => $e->getMessage(),
+            ]);
+            return is_string($text) ? $text : '';
+        }
     }
 
     function translateTrackInfo($jsonString, $targetLang = 'he')

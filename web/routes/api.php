@@ -13,6 +13,7 @@ use App\Http\Controllers\SyncController;
 use App\Http\Controllers\TrackingController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\SettingController;
+use App\Jobs\AllOrderCreateUpdateJob;
 use App\Jobs\fulfillmentCreateUpdateJob;
 use App\Jobs\unistallAppJob;
 use App\Models\Carrier;
@@ -216,209 +217,171 @@ Route::post('/webhooks/cargo-status-update', [FulfillmentController::class, 'han
 Route::post('/webhooks/app-uninstall', function (Request $request) {
     try {
         $shop_name = $request->header('x-shopify-shop-domain');
-//        $logs = new \App\Models\ErrorMessage();
-//        $logs->message = '$shop_name' . json_encode($shop_name);
-//        $logs->save();
         $session = Session::where('shop', $shop_name)->first();
-
-        dispatch(new unistallAppJob($session->id))->onConnection('database');
-
-        \Illuminate\Support\Facades\DB::table('sessions')->where('shop', $shop_name)->delete();
+        if ($session) {
+            dispatch(new unistallAppJob($session->id))->onConnection('database');
+            \Illuminate\Support\Facades\DB::table('sessions')->where('shop', $shop_name)->delete();
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'Uninstall catch' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/order-create', function (Request $request) {
+    // Shopify requires HTTP 200 within ~5s. Heavy work must be queued.
     try {
-//        $logs = new \App\Models\ErrorMessage();
-//        $logs->message = 'order create res: ' . json_encode($request->getContent());
-//        $logs->save();
-//        $order = json_decode($request->getContent());
-        $order = $request->getContent();
+        $shopDomain = $request->header('x-shopify-shop-domain');
+        $shop = $shopDomain ? Session::where('shop', $shopDomain)->first() : null;
+        $order = json_decode($request->getContent());
 
-        $shop = $request->header('x-shopify-shop-domain');
-        $shop = Session::where('shop', $shop)->first();
-        $webhook_controller = new \App\Http\Controllers\SyncController();
-        $order = json_decode($order);
-        $webhook_controller->createUpdateOrder($order, $shop);
+        if ($shop && $order) {
+            AllOrderCreateUpdateJob::dispatch($order, $shop)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'Order Create webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/order-update', function (Request $request) {
+    // Shopify requires HTTP 200 within ~5s. Heavy work must be queued.
     try {
-//        $logs = new \App\Models\ErrorMessage();
-//        $logs->message = 'order update res: ' . json_encode($request->getContent());
-//        $logs->save();
-//        $order = json_decode($request->getContent());
-        $order = $request->getContent();
-        $order = json_decode($order);
+        $shopDomain = $request->header('x-shopify-shop-domain');
+        $shop = $shopDomain ? Session::where('shop', $shopDomain)->first() : null;
+        $order = json_decode($request->getContent());
 
-        $shop = $request->header('x-shopify-shop-domain');
-        $shop = Session::where('shop', $shop)->first();
-        $webhook_controller = new \App\Http\Controllers\SyncController();
-        $webhook_controller->createUpdateOrder($order, $shop);
+        if ($shop && $order) {
+            AllOrderCreateUpdateJob::dispatch($order, $shop)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'Order update webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/product-create', function (Request $request) {
     try {
-//        $logs = new \App\Models\ErrorMessage();
-//        $logs->message = 'product create res: '.json_encode($request->getContent());
-//        $logs->save();
-        $product_controler = new ProductController();
         $shop = $request->header('x-shopify-shop-domain');
         $session = Session::where('shop', $shop)->first();
-        $data = $request->getContent();
-        $data = json_decode($data);
-        \App\Jobs\productCreateUpdateJob::dispatch($session,$data->id);
+        $data = json_decode($request->getContent());
+        if ($session && isset($data->id)) {
+            \App\Jobs\productCreateUpdateJob::dispatch($session, $data->id)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'product create webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/product-update', function (Request $request) {
     try {
-       /* $logs = new \App\Models\ErrorMessage();
-        $logs->message = 'product update res: ' . json_encode($request->getContent());
-        $logs->save();*/
-
-        $product_controler = new ProductController();
         $shop = $request->header('x-shopify-shop-domain');
         $session = Session::where('shop', $shop)->first();
-        $data = $request->getContent();
-        $data = json_decode($data);
-
-        \App\Jobs\productCreateUpdateJob::dispatch($session,$data->id);
+        $data = json_decode($request->getContent());
+        if ($session && isset($data->id)) {
+            \App\Jobs\productCreateUpdateJob::dispatch($session, $data->id)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'product update webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/product-delete', function (Request $request) {
     try {
-       /* $logs = new \App\Models\ErrorMessage();
-        $logs->message = 'product delete res: ' . json_encode($request->getContent());
-        $logs->save();*/
-
-        $shop_name = $request->header('x-shopify-shop-domain');
-        $shop = Session::where('shop', $shop_name)->first();
-
-        $response = $request->getContent();
-        $response = json_decode($response);
-        $product = Product::where('shopify_product_id', $response->id)->first();
-
-        if (isset($product)) {
-            if ($product->variants->count()) {
-                foreach ($product->variants as $variant) {
-                    $variant->forceDelete();
-                }
-            }
+        $data = json_decode($request->getContent());
+        if (isset($data->id)) {
+            \App\Jobs\ProductDeleteWebhookJob::dispatch($data->id)->onConnection('database');
         }
-
-        $product->forceDelete();
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'product delete webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/fulfillment-create', function (Request $request) {
     try {
         $fulfillment_api = json_decode($request->getContent());
         $shopDomain = $request->header('x-shopify-shop-domain');
-        if (!$shopDomain) {
-            return true;
+        if ($shopDomain && $fulfillment_api) {
+            fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection('database');
         }
-
-//        $msg = new ErrorMessage();
-//        $msg->message = "webhook fulfillment create api data: ".json_encode($fulfillment_api);
-//        $msg->save();
-
-        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection("database");
-
-//        return true;
-    } catch (Exception $exception) {
-//        $msg = new ErrorMessage();
-//        $msg->message = "Fulfillment create Webhook Exception: " . json_encode($exception->getMessage());
-//        $msg->save();
-        return true;
+    } catch (\Exception $exception) {
+        $msg = new ErrorMessage();
+        $msg->message = 'Fulfillment create Webhook Exception: ' . $exception->getMessage();
+        $msg->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/fulfillment-update', function (Request $request) {
     try {
         $fulfillment_api = json_decode($request->getContent());
         $shopDomain = $request->header('x-shopify-shop-domain');
-        if (!$shopDomain) {
-            return true;
+        if ($shopDomain && $fulfillment_api) {
+            fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection('database');
         }
-
-//        $msg = new ErrorMessage();
-//        $msg->message = "webhook fulfillment update api data: " . json_encode($fulfillment_api);
-//        $msg->save();
-        fulfillmentCreateUpdateJob::dispatch($fulfillment_api, $shopDomain)->onConnection("database");
-    } catch (Exception $exception) {
+    } catch (\Exception $exception) {
         $msg = new ErrorMessage();
-        $msg->message = "Fulfillment create Webhook Exception: " . $exception->getMessage();
+        $msg->message = 'Fulfillment update Webhook Exception: ' . $exception->getMessage();
         $msg->save();
-        return true;
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/collection-create', function (Request $request) {
     try {
-        /*$logs = new \App\Models\ErrorMessage();
-        $logs->message = 'collection create res: ' . json_encode($request->getContent());
-        $logs->save();*/
-
         $shop_name = $request->header('x-shopify-shop-domain');
         $session = Session::where('shop', $shop_name)->first();
-
-        $response = $request->getContent();
-        $response = json_decode($response);
-        \App\Jobs\collectionCreateUpdateJob::dispatch($session,$response->id);
-
+        $response = json_decode($request->getContent());
+        if ($session && isset($response->id)) {
+            \App\Jobs\collectionCreateUpdateJob::dispatch($session, $response->id)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'collection create webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 Route::post('/webhooks/collection-update', function (Request $request) {
     try {
-       /* $logs = new \App\Models\ErrorMessage();
-        $logs->message = 'collection update res: ' . json_encode($request->getContent());
-        $logs->save();*/
-
         $shop_name = $request->header('x-shopify-shop-domain');
         $session = Session::where('shop', $shop_name)->first();
-
-        $response = $request->getContent();
-        $response = json_decode($response);
-        \App\Jobs\collectionCreateUpdateJob::dispatch($session,$response->id);
-
+        $response = json_decode($request->getContent());
+        if ($session && isset($response->id)) {
+            \App\Jobs\collectionCreateUpdateJob::dispatch($session, $response->id)->onConnection('database');
+        }
     } catch (\Exception $e) {
         $error_log = new \App\Models\ErrorMessage();
         $error_log->message = 'collection update webhook error: ' . json_encode($e->getMessage());
         $error_log->save();
     }
+
+    return response()->json(['status' => 'ok'], 200);
 });
 
 

@@ -31,7 +31,18 @@ use Illuminate\Support\Facades\Mail;
 class fulfillmentCreateUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-    public $timeout = 100000000000;
+
+    /**
+     * Must stay <= queue:work --timeout on Cloudways (otherwise SIGKILL → MaxAttemptsExceeded).
+     * One fulfillment (DB + Track123/Cargo + optional Shopify GraphQL) should finish well under this.
+     */
+    public $timeout = 120;
+
+    /** Soft timeout / transient API failures: retry with backoff instead of burning all attempts at once. */
+    public $tries = 3;
+
+    /** @var int[] seconds */
+    public $backoff = [15, 45, 90];
 
     /**
      * Create a new job instance.

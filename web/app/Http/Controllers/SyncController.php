@@ -391,7 +391,8 @@ class SyncController extends HelperController
                 $days = null;
                 if (isset($specificDate) && $specificDate != "") {
                     if ($specificDate == 'Today') {
-                        $days = date('c');
+                        // Start of app day (UTC), not "now" — date('c') made Shopify return 0 orders.
+                        $days = Carbon::today()->toIso8601String();
                     } elseif ($specificDate == 'Last 7 days') {
                         $days = date('c', strtotime('-7 days'));
                     } elseif ($specificDate == 'Last 15 days') {

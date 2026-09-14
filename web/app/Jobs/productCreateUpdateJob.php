@@ -18,20 +18,19 @@ use Illuminate\Queue\SerializesModels;
 class productCreateUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-    public $timeout = 36000000; // 2 minute
-    public $tries = 5;
-    /**
-     * Create a new job instance.
-     *
-     * @return void
-     */
+    public $timeout = 120;
+    public $tries = 3;
 
-    public $session;
+    /** @var string */
+    public $shopDomain;
     public $shopify_id;
-    public function __construct($session,$shopify_id)
+
+    public function __construct($sessionOrDomain, $shopify_id)
     {
-        $this->session = $session;
         $this->shopify_id = $shopify_id;
+        $this->shopDomain = is_object($sessionOrDomain) && isset($sessionOrDomain->shop)
+            ? (string) $sessionOrDomain->shop
+            : (string) $sessionOrDomain;
     }
 
     /**
@@ -41,7 +40,7 @@ class productCreateUpdateJob implements ShouldQueue
      */
     public function handle()
     {
-        $session = $this->session;
+        $session = Session::where('shop', $this->shopDomain)->first();
         $p_controller = new ProductController();
         $helper = new HelperController();
         if(isset($session)){
