@@ -13,6 +13,13 @@ class ProductDeleteWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public $timeout = 60;
+
+    public $tries = 3;
+
+    /** @var int[] */
+    public $backoff = [15, 45, 90];
+
     public $shopifyProductId;
 
     public function __construct($shopifyProductId)

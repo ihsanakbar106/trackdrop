@@ -38,6 +38,11 @@ class RouteServiceProvider extends ServiceProvider
         $this->configureRateLimiting();
 
         $this->routes(function () {
+            // Shopify webhooks: no "api" middleware (no throttle) — ACK must be <5s.
+            Route::prefix('api')
+                ->namespace($this->namespace)
+                ->group(base_path('routes/shopify_webhooks.php'));
+
             Route::prefix('api')
                 ->middleware('api')
                 ->namespace($this->namespace)

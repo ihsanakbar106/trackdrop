@@ -84,8 +84,8 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
 
             if (isset($fulfillment_api) && isset($fulfillment_api->tracking_company) && $shop && $shop->plan_id) {
                 $fulfillment = Fulfillment::with('order')->where('fulfillment_id', $fulfillment_api->id)->first();
-                $order = $fulfillment->order;
-                if (isset($fulfillment) && isset($order)) {
+                $order = $fulfillment ? $fulfillment->order : null;
+                if ($fulfillment && $order) {
                     $shopify_order_id=$order->shopify_order_id;
 //                    $tracking_company = Carrier::where(function ($query) use ($fulfillment) {
 //                        $query->where('name', $fulfillment->tracking_company)->orWhere('code', $fulfillment->tracking_company);
@@ -227,10 +227,14 @@ class fulfillmentCreateUpdateJob implements ShouldQueue
                 }
 
             }
-        } catch (\Exception $e) {
-            $msg = new ErrorMessage();
-            $msg->message = "fulfillmentCreateUpdateJob error:" . $e->getMessage()." line:". $e->getLine();
-            $msg->save();
+        } catch (\Throwable $e) {
+            try {
+                $msg = new ErrorMessage();
+                $msg->message = "fulfillmentCreateUpdateJob error:" . $e->getMessage()." line:". $e->getLine();
+                $msg->save();
+            } catch (\Throwable $ignored) {
+            }
+            throw $e;
         }
     }
 }

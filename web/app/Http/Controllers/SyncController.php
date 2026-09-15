@@ -109,7 +109,7 @@ class SyncController extends HelperController
             }
         }
 
-        dd('done');
+        return response()->json(['status' => 'ok']);
 
     }
 
@@ -468,8 +468,25 @@ class SyncController extends HelperController
                         break;
                     }
 
-                    $orders = $order_api['body']['orders'] ?? [];
-                    $pageOrderCount = is_countable($orders) ? count($orders) : 0;
+                    $orders = [];
+                    $body = $order_api['body'] ?? null;
+                    if (is_array($body) && isset($body['orders'])) {
+                        $orders = $body['orders'];
+                    } elseif (is_object($body)) {
+                        if (isset($body->orders)) {
+                            $orders = $body->orders;
+                        } elseif (method_exists($body, 'toArray')) {
+                            $asArray = $body->toArray();
+                            $orders = is_array($asArray) ? ($asArray['orders'] ?? []) : [];
+                        }
+                    }
+                    if ($orders instanceof \Traversable) {
+                        $orders = iterator_to_array($orders);
+                    }
+                    if (!is_array($orders)) {
+                        $orders = [];
+                    }
+                    $pageOrderCount = count($orders);
 
                     if (!empty($orders)) {
                         foreach ($orders as $order) {
@@ -481,8 +498,9 @@ class SyncController extends HelperController
                                 $sync_controller->createUpdateOrder($order, $shop, !$fastBulk);
                                 $ordersProcessed++;
 
-                                if (!empty($order['fulfillments'])) {
-                                    foreach ($order['fulfillments'] as $fulfillment_api) {
+                                $fulfillments = data_get($order, 'fulfillments') ?: [];
+                                if (!empty($fulfillments)) {
+                                    foreach ($fulfillments as $fulfillment_api) {
                                         try {
                                             $fulfillment_api = json_decode(json_encode($fulfillment_api), false);
                                             $sync_controller->createUpdateFufillment($fulfillment_api, $shop);
@@ -616,7 +634,7 @@ class SyncController extends HelperController
 
         for ($attempt = 1; $attempt <= $maxFetchAttempts; $attempt++) {
             try {
-                $order_api = $this->getShopApi($shopDomain)->rest('get', '/admin/orders', $params);
+                $order_api = $this->getShopApi($shopDomain)->rest('GET', '/admin/orders.json', $params);
 
                 // Retry transient Shopify API errors (timeout body / 429 / 5xx-ish messages).
                 if ($order_api['errors'] !== false) {
@@ -1000,24 +1018,23 @@ QUERY;
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_ENCODING => '',
                 CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 0,
+                CURLOPT_TIMEOUT => 60,
+                CURLOPT_CONNECTTIMEOUT => 15,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
                 CURLOPT_CUSTOMREQUEST => 'GET',
                 CURLOPT_HTTPHEADER => array(
-                    'Track123-Api-Secret: e198fe1eda804c57a7fa18d9103f7f81',
+                    'Track123-Api-Secret: ' . $api_setting->api_key,
                     'Content-Type: application/json',
                     'User-Agent: PostmanRuntime/7.28.4'
                 ),
-                CURLOPT_SSL_VERIFYHOST => 0,  // Bypass SSL (for testing)
-                CURLOPT_SSL_VERIFYPEER => 0,  // Bypass SSL (for testing)
-                CURLOPT_VERBOSE => true       // Enable verbose output for debugging
             ));
 
             $response = curl_exec($curl);
 
             if (curl_errno($curl)) {
-                dd( 'Error: ' . curl_error($curl));
+                \Log::error('Track123 courier list curl error: ' . curl_error($curl));
+                return;
             }
             $response = json_decode($response);
 //            dd($response);
@@ -1137,7 +1154,7 @@ QUERY;
     public function webhooks()
     {
         $webhook = Auth::user()->api()->rest('GET', '/admin/webhooks.json');
-        dd($webhook);
+        return response()->json($webhook);
     }
 
     public function get_browser_name($user_agent)
@@ -1244,7 +1261,7 @@ QUERY;
         return true;
         $shop  = $this->getShop($request);
         $this->UpdateStoreOrderTrackings($shop, $request->datefilter);
-        dd('done');
+        return response()->json(['status' => 'ok']);
     }
 
     public function updateCarrier($shopify_order_id){

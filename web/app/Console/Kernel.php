@@ -31,6 +31,8 @@ class Kernel extends ConsoleKernel
     {
         $schedule->command('PlanChargeStatus:cron')->everyFourHours();
         $schedule->command('update_order_tracking_detail:cron')->everyTwoHours()->withoutOverlapping();
+        // Recover webhooks that were ACK'd but not enqueued (DB blip after early ACK).
+        $schedule->command('shopify:process-webhook-inbox')->everyMinute()->withoutOverlapping();
 
         $schedule->call(function () {
             $date=Carbon::now()->subDays(6)->toDateString();

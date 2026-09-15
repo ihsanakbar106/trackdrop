@@ -897,7 +897,8 @@ class FulfillmentController extends HelperController
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_ENCODING => '',
                 CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 0,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
                 CURLOPT_CUSTOMREQUEST => 'POST',
@@ -1208,16 +1209,23 @@ class FulfillmentController extends HelperController
                         }
                         $delivery_status=strtolower($delivery_status);
                     }
-                    if($delivery_status_c=="NO_RECORD"){
+                    $localLogistics = is_array($content['localLogisticsInfo'] ?? null)
+                        ? $content['localLogisticsInfo']
+                        : [];
+                    $trackingDetails = is_array($localLogistics['trackingDetails'] ?? null)
+                        ? $localLogistics['trackingDetails']
+                        : [];
+                    // NO_RECORD / INIT / any status without events — never read missing trackingDetails.
+                    if ($delivery_status_c == "NO_RECORD" || $delivery_status_c == "INIT" || empty($trackingDetails)) {
                         return [
                             'id' => $tracking_id,
                             'tracking_number' => isset($content['trackNo']) ? $content['trackNo'] : null,
-                            'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                            'courier_code' => $localLogistics['courierCode'] ?? null,
                             'order_number' => isset($content['id']) ? $content['id'] : null,
                             'order_date' => isset($content['orderTime']) ? $content['orderTime'] : null, // Map if available
                             'created_at' => isset($content['createTime']) ? $content['createTime'] : now()->toIso8601String(),
                             'update_at' => isset($content['lastTrackingTime']) ? $content['lastTrackingTime'] : now()->toIso8601String(),
-                            'delivery_status' => $delivery_status,
+                            'delivery_status' => $delivery_status ?: 'pending',
                             'archived' => 'tracking',
                             'updating' => false,
                             'source' => 'API',
@@ -1260,9 +1268,9 @@ class FulfillmentController extends HelperController
                             'latest_checkpoint_time' => null,
                             'transit_time' => 0,
                             'origin_info' => [
-                                'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                                'courier_code' => $localLogistics['courierCode'] ?? null,
                                 'courier_phone' => '',
-                                'weblink' => isset($content['localLogisticsInfo']['courierHomePage']) ? $content['localLogisticsInfo']['courierHomePage'] : null,
+                                'weblink' => $localLogistics['courierHomePage'] ?? null,
                                 'reference_number' => null,
                                 'milestone_date' => [
                                     'inforeceived_date' =>  null,
@@ -1291,29 +1299,29 @@ class FulfillmentController extends HelperController
                             ]
                         ];
                     }
-                    $reversedTrackingDetails = array_reverse($content['localLogisticsInfo']['trackingDetails']);
+                    $reversedTrackingDetails = array_reverse($trackingDetails);
                     $statuses = [
                         'INFO_RECEIVED_01' => null,
                         'IN_TRANSIT_01' => null,
                         'WAITING_DELIVERY' => null,
                     ];
                     foreach ($reversedTrackingDetails as $detail){
-                        $status = $detail['transitSubStatus'];
+                        $status = $detail['transitSubStatus'] ?? '';
                         // Check if it's INFO_RECEIVED_01 or IN_TRANSIT_01
                         if ($status === 'INFO_RECEIVED_01' && !$statuses['INFO_RECEIVED_01']) {
-                            $statuses['INFO_RECEIVED_01'] = $detail['eventTime'];
+                            $statuses['INFO_RECEIVED_01'] = $detail['eventTime'] ?? null;
                         } elseif ($status === 'IN_TRANSIT_01' && !$statuses['IN_TRANSIT_01']) {
-                            $statuses['IN_TRANSIT_01'] = $detail['eventTime'];
+                            $statuses['IN_TRANSIT_01'] = $detail['eventTime'] ?? null;
                         }
 
                         // Handle WAITING_DELIVERY_01 and WAITING_DELIVERY_02
-                        if (str_starts_with($status, 'WAITING_DELIVERY')) {
+                        if ($status !== '' && str_starts_with($status, 'WAITING_DELIVERY')) {
                             if ($status === 'WAITING_DELIVERY_01') {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             } elseif ($status === 'WAITING_DELIVERY_02' && !$statuses['WAITING_DELIVERY']) {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             } elseif ($status === 'WAITING_DELIVERY_03' && !$statuses['WAITING_DELIVERY']) {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             }
                         }
                     }
@@ -1327,7 +1335,7 @@ class FulfillmentController extends HelperController
                     return [
                         'id' => $tracking_id,
                         'tracking_number' => isset($content['trackNo']) ? $content['trackNo'] : null,
-                        'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                        'courier_code' => $localLogistics['courierCode'] ?? null,
                         'order_number' => isset($content['id']) ? $content['id'] : null,
                         'order_date' => isset($content['orderTime']) ? $content['orderTime'] : null, // Map if available
                         'created_at' => isset($content['createTime']) ? $content['createTime'] : now()->toIso8601String(),
@@ -1371,17 +1379,15 @@ class FulfillmentController extends HelperController
                         'scheduled_address' => null,
                         'substatus' => isset($content['transitSubStatus']) ? strtolower($content['transitSubStatus']) : null,
                         'status_info' => null,
-                        'latest_event' => isset($content['localLogisticsInfo']['trackingDetails'][0]['eventDetail'])
-                            ? $content['localLogisticsInfo']['trackingDetails'][0]['eventDetail'] . ',' . $content['localLogisticsInfo']['trackingDetails'][0]['address'] . ',' . $content['localLogisticsInfo']['trackingDetails'][0]['eventTime']
+                        'latest_event' => isset($trackingDetails[0]['eventDetail'])
+                            ? ($trackingDetails[0]['eventDetail'] ?? '') . ',' . ($trackingDetails[0]['address'] ?? '') . ',' . ($trackingDetails[0]['eventTime'] ?? '')
                             : null,
-                        'latest_checkpoint_time' => isset($content['localLogisticsInfo']['trackingDetails'][0]['eventTimeZeroUTC'])
-                            ? $content['localLogisticsInfo']['trackingDetails'][0]['eventTimeZeroUTC']
-                            : null,
+                        'latest_checkpoint_time' => $trackingDetails[0]['eventTimeZeroUTC'] ?? null,
                         'transit_time' => 0,
                         'origin_info' => [
-                            'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                            'courier_code' => $localLogistics['courierCode'] ?? null,
                             'courier_phone' => '',
-                            'weblink' => isset($content['localLogisticsInfo']['courierHomePage']) ? $content['localLogisticsInfo']['courierHomePage'] : null,
+                            'weblink' => $localLogistics['courierHomePage'] ?? null,
                             'reference_number' => null,
                             'milestone_date' => [
                                 'inforeceived_date' =>  $info_received_date,
@@ -1391,8 +1397,7 @@ class FulfillmentController extends HelperController
                                 'returning_date' => $returning_date,
                                 'returned_date' => $returned_date
                             ],
-                            'trackinfo' => isset($content['localLogisticsInfo']['trackingDetails'])
-                                ? array_map(function ($detail) use($exclude_keywords) {
+                            'trackinfo' => array_map(function ($detail) use ($exclude_keywords) {
                                     return [
                                         'checkpoint_date' => isset($detail['eventTimeZeroUTC']) ? $detail['eventTimeZeroUTC'] : null,
                                         'checkpoint_delivery_status' => isset($detail['eventDetail']) ? strtolower($detail['eventDetail']) : null,
@@ -1405,8 +1410,7 @@ class FulfillmentController extends HelperController
                                         'zip' => '',
                                         'raw_status' => null,
                                     ];
-                                }, $content['localLogisticsInfo']['trackingDetails'])
-                                : []
+                                }, $trackingDetails)
                         ],
                         'destination_info' => [
                             'courier_code' => null,
@@ -1521,16 +1525,23 @@ class FulfillmentController extends HelperController
                         }
                         $delivery_status=strtolower($delivery_status);
                     }
-                    if($delivery_status_c=="NO_RECORD"){
+                    $localLogistics = is_array($content['localLogisticsInfo'] ?? null)
+                        ? $content['localLogisticsInfo']
+                        : [];
+                    $trackingDetails = is_array($localLogistics['trackingDetails'] ?? null)
+                        ? $localLogistics['trackingDetails']
+                        : [];
+                    // NO_RECORD / INIT / any status without events — never read missing trackingDetails.
+                    if ($delivery_status_c == "NO_RECORD" || $delivery_status_c == "INIT" || empty($trackingDetails)) {
                         return [
                             'id' => $tracking_id,
                             'tracking_number' => isset($content['trackNo']) ? $content['trackNo'] : null,
-                            'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                            'courier_code' => $localLogistics['courierCode'] ?? null,
                             'order_number' => isset($content['id']) ? $content['id'] : null,
                             'order_date' => isset($content['orderTime']) ? $content['orderTime'] : null, // Map if available
                             'created_at' => isset($content['createTime']) ? $content['createTime'] : now()->toIso8601String(),
                             'update_at' => isset($content['lastTrackingTime']) ? $content['lastTrackingTime'] : now()->toIso8601String(),
-                            'delivery_status' => $delivery_status,
+                            'delivery_status' => $delivery_status ?: 'pending',
                             'archived' => 'tracking',
                             'updating' => false,
                             'source' => 'API',
@@ -1573,9 +1584,9 @@ class FulfillmentController extends HelperController
                             'latest_checkpoint_time' => null,
                             'transit_time' => 0,
                             'origin_info' => [
-                                'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                                'courier_code' => $localLogistics['courierCode'] ?? null,
                                 'courier_phone' => '',
-                                'weblink' => isset($content['localLogisticsInfo']['courierHomePage']) ? $content['localLogisticsInfo']['courierHomePage'] : null,
+                                'weblink' => $localLogistics['courierHomePage'] ?? null,
                                 'reference_number' => null,
                                 'milestone_date' => [
                                     'inforeceived_date' =>  null,
@@ -1604,29 +1615,29 @@ class FulfillmentController extends HelperController
                             ]
                         ];
                     }
-                    $reversedTrackingDetails = array_reverse($content['localLogisticsInfo']['trackingDetails']);
+                    $reversedTrackingDetails = array_reverse($trackingDetails);
                     $statuses = [
                         'INFO_RECEIVED_01' => null,
                         'IN_TRANSIT_01' => null,
                         'WAITING_DELIVERY' => null,
                     ];
                     foreach ($reversedTrackingDetails as $detail){
-                        $status = $detail['transitSubStatus'];
+                        $status = $detail['transitSubStatus'] ?? '';
                         // Check if it's INFO_RECEIVED_01 or IN_TRANSIT_01
                         if ($status === 'INFO_RECEIVED_01' && !$statuses['INFO_RECEIVED_01']) {
-                            $statuses['INFO_RECEIVED_01'] = $detail['eventTime'];
+                            $statuses['INFO_RECEIVED_01'] = $detail['eventTime'] ?? null;
                         } elseif ($status === 'IN_TRANSIT_01' && !$statuses['IN_TRANSIT_01']) {
-                            $statuses['IN_TRANSIT_01'] = $detail['eventTime'];
+                            $statuses['IN_TRANSIT_01'] = $detail['eventTime'] ?? null;
                         }
 
                         // Handle WAITING_DELIVERY_01 and WAITING_DELIVERY_02
-                        if (str_starts_with($status, 'WAITING_DELIVERY')) {
+                        if ($status !== '' && str_starts_with($status, 'WAITING_DELIVERY')) {
                             if ($status === 'WAITING_DELIVERY_01') {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             } elseif ($status === 'WAITING_DELIVERY_02' && !$statuses['WAITING_DELIVERY']) {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             } elseif ($status === 'WAITING_DELIVERY_03' && !$statuses['WAITING_DELIVERY']) {
-                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'];
+                                $statuses['WAITING_DELIVERY'] = $detail['eventTime'] ?? null;
                             }
                         }
                     }
@@ -1640,7 +1651,7 @@ class FulfillmentController extends HelperController
                     return [
                         'id' => $tracking_id,
                         'tracking_number' => isset($content['trackNo']) ? $content['trackNo'] : null,
-                        'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                        'courier_code' => $localLogistics['courierCode'] ?? null,
                         'order_number' => isset($content['id']) ? $content['id'] : null,
                         'order_date' => isset($content['orderTime']) ? $content['orderTime'] : null, // Map if available
                         'created_at' => isset($content['createTime']) ? $content['createTime'] : now()->toIso8601String(),
@@ -1684,17 +1695,15 @@ class FulfillmentController extends HelperController
                         'scheduled_address' => null,
                         'substatus' => isset($content['transitSubStatus']) ? strtolower($content['transitSubStatus']) : null,
                         'status_info' => null,
-                        'latest_event' => isset($content['localLogisticsInfo']['trackingDetails'][0]['eventDetail'])
-                            ? $content['localLogisticsInfo']['trackingDetails'][0]['eventDetail'] . ',' . $content['localLogisticsInfo']['trackingDetails'][0]['address'] . ',' . $content['localLogisticsInfo']['trackingDetails'][0]['eventTime']
+                        'latest_event' => isset($trackingDetails[0]['eventDetail'])
+                            ? ($trackingDetails[0]['eventDetail'] ?? '') . ',' . ($trackingDetails[0]['address'] ?? '') . ',' . ($trackingDetails[0]['eventTime'] ?? '')
                             : null,
-                        'latest_checkpoint_time' => isset($content['localLogisticsInfo']['trackingDetails'][0]['eventTimeZeroUTC'])
-                            ? $content['localLogisticsInfo']['trackingDetails'][0]['eventTimeZeroUTC']
-                            : null,
+                        'latest_checkpoint_time' => $trackingDetails[0]['eventTimeZeroUTC'] ?? null,
                         'transit_time' => 0,
                         'origin_info' => [
-                            'courier_code' => isset($content['localLogisticsInfo']['courierCode']) ? $content['localLogisticsInfo']['courierCode'] : null,
+                            'courier_code' => $localLogistics['courierCode'] ?? null,
                             'courier_phone' => '',
-                            'weblink' => isset($content['localLogisticsInfo']['courierHomePage']) ? $content['localLogisticsInfo']['courierHomePage'] : null,
+                            'weblink' => $localLogistics['courierHomePage'] ?? null,
                             'reference_number' => null,
                             'milestone_date' => [
                                 'inforeceived_date' =>  $info_received_date,
@@ -1704,8 +1713,7 @@ class FulfillmentController extends HelperController
                                 'returning_date' => $returning_date,
                                 'returned_date' => $returned_date
                             ],
-                            'trackinfo' => isset($content['localLogisticsInfo']['trackingDetails'])
-                                ? array_map(function ($detail) use($exclude_keywords) {
+                            'trackinfo' => array_map(function ($detail) use ($exclude_keywords) {
                                     return [
                                         'checkpoint_date' => isset($detail['eventTimeZeroUTC']) ? $detail['eventTimeZeroUTC'] : null,
                                         'checkpoint_delivery_status' => isset($detail['eventDetail']) ? strtolower($detail['eventDetail']) : null,
@@ -1718,8 +1726,7 @@ class FulfillmentController extends HelperController
                                         'zip' => '',
                                         'raw_status' => null,
                                     ];
-                                }, $content['localLogisticsInfo']['trackingDetails'])
-                                : []
+                                }, $trackingDetails)
                         ],
                         'destination_info' => [
                             'courier_code' => null,
@@ -2335,33 +2342,43 @@ class FulfillmentController extends HelperController
 //                        }
                     }
                     if (isset($fulfillments[0]->id)) {
-                        if($fulfillments[0]->track_info ){
-                            if($translation_code !="en") {
-                                foreach ($fulfillments as &$fulfill) {
-                                    try {
-                                        $fulfill->shipment_status_t = $this->translateText($fulfill->shipment_status, $translation_code);
-                                        $fulfill->track_info = $this->translateTrackInfo($fulfill->track_info, $translation_code);
-                                    } catch (\Throwable $e) {
-                                        // Translation failed — keep original English on the page.
-                                    }
+                        // Reload after refreshTracking so newly saved track_info is visible.
+                        $fulfillments = $fulfillments->map(function ($f) {
+                            return Fulfillment::with(['order', 'order.lineitems', 'carrier_name_base', 'carrier_code_base'])
+                                ->find($f->id) ?: $f;
+                        })->values();
+
+                        // Carrier may return NO_RECORD (empty events). Still show the shipment
+                        // as pending instead of a hard "No tracking detail" error.
+                        foreach ($fulfillments as $fulfill) {
+                            $ti = trim((string) ($fulfill->track_info ?? ''));
+                            if ($ti === '' || $ti === 'null') {
+                                $fulfill->track_info = '[]';
+                                if (empty($fulfill->shipment_status)) {
+                                    $fulfill->shipment_status = 'pending';
                                 }
                             }
-//                        if($fulfillments[0]->track_info && !empty($fulfillments[0]->track_info) && ($fulfillments[0]->track_info) !="[]"){
-                            $data = array(
-                                'status' => 'success',
-                                'search' => $request['search'],
-                                'email' => $request['email'],
-                                'name' => $request['name'],
-                                'fulfillments' => $fulfillments,
-                                'trackingPage' => $trackingPage,
-                                'recomendation' => $recomendation,
-                            );
-                        }else{
-                            $data = array(
-                                'status' => 'error',
-                                'message' => 'No traking detail found!'
-                            );
                         }
+
+                        if($translation_code !="en") {
+                            foreach ($fulfillments as &$fulfill) {
+                                try {
+                                    $fulfill->shipment_status_t = $this->translateText($fulfill->shipment_status, $translation_code);
+                                    $fulfill->track_info = $this->translateTrackInfo($fulfill->track_info, $translation_code);
+                                } catch (\Throwable $e) {
+                                    // Translation failed — keep original English on the page.
+                                }
+                            }
+                        }
+                        $data = array(
+                            'status' => 'success',
+                            'search' => $request['search'],
+                            'email' => $request['email'],
+                            'name' => $request['name'],
+                            'fulfillments' => $fulfillments,
+                            'trackingPage' => $trackingPage,
+                            'recomendation' => $recomendation,
+                        );
 
                     } else {
                         $data = array(
@@ -2384,9 +2401,14 @@ class FulfillmentController extends HelperController
                 );
             }
         } catch (\Exception $exception) {
+            \Log::warning('search_tracking_number failed', [
+                'shop' => $request['shop'] ?? null,
+                'tracking_number' => $request['tracking_number'] ?? null,
+                'message' => $exception->getMessage(),
+            ]);
             $data = array(
                 'status' => 'error',
-                'message' => $exception->getMessage()
+                'message' => 'Unable to fetch tracking details right now. Please try again.',
             );
         }
 
@@ -2416,18 +2438,36 @@ class FulfillmentController extends HelperController
                  $fulfillment_controller = new \App\Http\Controllers\FulfillmentController();
                  foreach ($fulfillments as $fulfillment) {
                      if($fulfillment->shipment_status!="delivered") {
-                         $shipping_status = $fulfillment_controller->shipping_status(
-                             $fulfillment->fulfillment_id,
-                             $fulfillment->tracking_number,
-                             $fulfillment->tracking_company,
-                             $shop
-                         );
-//                        dd($shipping_status);
-                         if (isset($shipping_status) && isset($shipping_status->data) && !empty($shipping_status->data)) {
-                             if ($shipping_status != false) {
-                                 $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment);
-                                 return true;
+                         try {
+                             // Only register when we have no usable track timeline yet.
+                             // Re-import of already-registered TNs does not burn Track123 credits.
+                             $ti = trim((string) ($fulfillment->track_info ?? ''));
+                             $needsRegister = ($ti === '' || $ti === '[]' || $ti === 'null');
+                             if ($needsRegister) {
+                                 $fulfillment_controller->carrier_register(
+                                     $fulfillment->tracking_number,
+                                     $fulfillment->tracking_company
+                                 );
                              }
+                             $shipping_status = $fulfillment_controller->shipping_status(
+                                 $fulfillment->fulfillment_id,
+                                 $fulfillment->tracking_number,
+                                 $fulfillment->tracking_company,
+                                 $shop
+                             );
+                             if (isset($shipping_status) && isset($shipping_status->data) && !empty($shipping_status->data)) {
+                                 if ($shipping_status != false) {
+                                     $fulfillment_controller->shippingStatusUpdate($shipping_status, $fulfillment);
+                                     return true;
+                                 }
+                             }
+                         } catch (\Throwable $e) {
+                             \Log::warning('refreshTracking carrier failure', [
+                                 'fulfillment_id' => $fulfillment->fulfillment_id ?? null,
+                                 'tracking_number' => $fulfillment->tracking_number ?? null,
+                                 'message' => $e->getMessage(),
+                             ]);
+                             continue;
                          }
                      }
                  }
