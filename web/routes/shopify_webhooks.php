@@ -2,7 +2,8 @@
 
 /**
  * Fallback Shopify webhook routes (if a request bypasses public/index.php early ACK).
- * Normal Cloudways traffic is handled in public/index.php BEFORE Laravel boots.
+ * After ACK: persist inbox file only — do NOT dispatch jobs (keeps FPM free).
+ * Cron `shopify:process-webhook-inbox` drains the inbox.
  */
 
 use App\Support\ShopifyWebhookAck;
@@ -17,7 +18,7 @@ $ackInbox = function (string $topic) {
         $hmac = (string) $request->header('x-shopify-hmac-sha256', '');
 
         return ShopifyWebhookAck::then(function () use ($topic, $shop, $body, $hmac) {
-            ShopifyWebhookInbox::dispatchEnvelope((object) [
+            ShopifyWebhookInbox::persistEnvelope([
                 'topic' => $topic,
                 'shop' => $shop,
                 'body_b64' => base64_encode($body),

@@ -13,14 +13,42 @@ use App\Models\Session;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Durable Shopify webhook inbox — ACK happens in public/index.php before Laravel boots.
- * Files land in storage/app/shopify_webhook_inbox; we enqueue jobs then delete.
+ * Durable Shopify webhook inbox — ACK + file write in public/index.php (no Laravel boot).
+ * Cron `shopify:process-webhook-inbox` enqueues jobs then deletes files.
  */
 final class ShopifyWebhookInbox
 {
     public static function directory(): string
     {
         return storage_path('app/shopify_webhook_inbox');
+    }
+
+    /**
+     * Persist envelope to inbox only (no job dispatch). Safe after ACK.
+     *
+     * @param  array{topic:string,shop?:string,body_b64?:string,body?:string,hmac?:string}  $envelope
+     */
+    public static function persistEnvelope(array $envelope): bool
+    {
+        $dir = self::directory();
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return false;
+        }
+
+        $envelope['received_at'] = $envelope['received_at'] ?? gmdate('c');
+
+        try {
+            $name = gmdate('YmdHis') . '_' . bin2hex(random_bytes(8)) . '.json';
+        } catch (\Throwable $e) {
+            $name = gmdate('YmdHis') . '_' . str_replace('.', '', uniqid('', true)) . '.json';
+        }
+
+        $encoded = json_encode($envelope, JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($encoded === false) {
+            return false;
+        }
+
+        return @file_put_contents($dir . DIRECTORY_SEPARATOR . $name, $encoded) !== false;
     }
 
     /**
