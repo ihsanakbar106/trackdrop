@@ -4,8 +4,11 @@
  * Fallback Shopify webhook routes (if a request bypasses public/index.php early ACK).
  * After ACK: persist inbox file only — do NOT dispatch jobs (keeps FPM free).
  * Cron `shopify:process-webhook-inbox` drains the inbox.
+ *
+ * Also hosts Cargo status webhook (no api throttle) so carrier pushes are not rate-limited.
  */
 
+use App\Http\Controllers\FulfillmentController;
 use App\Support\ShopifyWebhookAck;
 use App\Support\ShopifyWebhookInbox;
 use Illuminate\Http\Request;
@@ -38,3 +41,6 @@ Route::post('/webhooks/fulfillment-create', $ackInbox('fulfillment-create'));
 Route::post('/webhooks/fulfillment-update', $ackInbox('fulfillment-update'));
 Route::post('/webhooks/collection-create', $ackInbox('collection-create'));
 Route::post('/webhooks/collection-update', $ackInbox('collection-update'));
+
+// Cargo carrier status push — must not use api throttle group.
+Route::post('/webhooks/cargo-status-update', [FulfillmentController::class, 'handleCargoStatusWebhook']);

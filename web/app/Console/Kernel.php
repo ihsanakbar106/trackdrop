@@ -19,6 +19,8 @@ class Kernel extends ConsoleKernel
         Commands\PlanChargeStatus::class,
         Commands\UpdateOrderTrackingDetailCron::class,
         Commands\RegisterCargoWebhook::class,
+        Commands\TestCargoWebhook::class,
+        Commands\RefreshTrackingNumbers::class,
     ];
 
     /**

@@ -208,10 +208,7 @@ Route::any('test-flow', function (Request $request) {
 });
 
 
-//webhooks
-Route::post('/webhooks/cargo-status-update', [FulfillmentController::class, 'handleCargoStatusWebhook']);
-
-// Shopify HTTP webhooks live in routes/shopify_webhooks.php (no api throttle; early ACK).
+// Cargo + Shopify HTTP webhooks live in routes/shopify_webhooks.php (no api throttle).
 
 Route::get('delete/webhooks', function () {
     $shops = Session::get();

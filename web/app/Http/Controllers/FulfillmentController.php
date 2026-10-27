@@ -810,66 +810,95 @@ class FulfillmentController extends HelperController
 
     public function handleCargoStatusWebhook(Request $request)
     {
-        $secret = env('CARGO_WEBHOOK_SECRET');
-        if (empty($secret) && app()->environment('production')) {
-            return response()->json(['status' => 'error', 'message' => 'Webhook secret not configured'], 503);
-        }
-        if (!empty($secret)) {
-            $provided = $request->header('X-Cargo-Webhook-Secret')
-                ?: $request->query('secret');
-            if ($provided !== $secret) {
-                return response()->json(['status' => 'error', 'message' => 'Unauthorized'], 401);
+        try {
+            $secret = env('CARGO_WEBHOOK_SECRET');
+            if (empty($secret) && app()->environment('production')) {
+                return response()->json(['status' => 'error', 'message' => 'Webhook secret not configured'], 503);
             }
-        }
-
-        $payload = $request->all();
-        if (empty($payload)) {
-            $decoded = json_decode($request->getContent(), true);
-            $payload = is_array($decoded) ? $decoded : [];
-        }
-
-        $data = $payload['data'] ?? $payload;
-        if (isset($data[0]) && is_array($data[0])) {
-            $data = $data[0]['data'] ?? $data[0];
-        }
-        $shipmentId = $data['shipment_id'] ?? ($payload['shipment_id'] ?? null);
-        if ($shipmentId === null || $shipmentId === '') {
-            return response()->json(['status' => 'error', 'message' => 'shipment_id required'], 422);
-        }
-
-        $shipmentIdStr = (string) $shipmentId;
-        $matches = Fulfillment::query()
-            ->where(function ($q) use ($shipmentIdStr) {
-                $q->where('shipment_id', $shipmentIdStr)
-                    ->orWhere('tracking_number', $shipmentIdStr);
-            })
-            ->where(function ($q) {
-                $q->whereRaw('LOWER(tracking_company) LIKE ?', ['%cargo%'])
-                    ->orWhere('tracking_company', 'cargo');
-            })
-            ->orderByDesc('updated_at')
-            ->get();
-
-        if ($matches->isEmpty()) {
-            return response()->json(['status' => 'error', 'message' => 'Fulfillment not found'], 404);
-        }
-        if ($matches->count() > 1) {
-            $sessionIds = $matches->pluck('session_id')->unique();
-            if ($sessionIds->count() > 1) {
-                return response()->json(['status' => 'error', 'message' => 'Ambiguous fulfillment match'], 409);
+            if (!empty($secret)) {
+                $provided = $request->header('X-Cargo-Webhook-Secret')
+                    ?: $request->query('secret');
+                if ($provided !== $secret) {
+                    return response()->json(['status' => 'error', 'message' => 'Unauthorized'], 401);
+                }
             }
+
+            $payload = $request->all();
+            if (empty($payload)) {
+                $decoded = json_decode($request->getContent(), true);
+                $payload = is_array($decoded) ? $decoded : [];
+            }
+
+            $data = $payload['data'] ?? $payload;
+            if (isset($data[0]) && is_array($data[0])) {
+                $data = $data[0]['data'] ?? $data[0];
+            }
+            if (is_object($data)) {
+                $data = (array) $data;
+            }
+            $shipmentId = $data['shipment_id'] ?? ($payload['shipment_id'] ?? null);
+            if ($shipmentId === null || $shipmentId === '') {
+                return response()->json(['status' => 'error', 'message' => 'shipment_id required'], 422);
+            }
+
+            $shipmentIdStr = (string) $shipmentId;
+            $matches = Fulfillment::query()
+                ->where(function ($q) use ($shipmentIdStr) {
+                    $q->where('shipment_id', $shipmentIdStr)
+                        ->orWhere('tracking_number', $shipmentIdStr)
+                        ->orWhere('tracking_number', (string) ((int) $shipmentIdStr));
+                })
+                ->where(function ($q) {
+                    $q->whereNull('tracking_company')
+                        ->orWhere('tracking_company', '')
+                        ->orWhereRaw('LOWER(tracking_company) LIKE ?', ['%cargo%'])
+                        ->orWhereRaw("LOWER(REPLACE(tracking_company, ' ', '')) IN (?, ?, ?, ?)", [
+                            'cargo',
+                            'cargo.co.il',
+                            'cargocoil',
+                            'cargologistics',
+                        ]);
+                })
+                ->orderByDesc('updated_at')
+                ->get();
+
+            if ($matches->isEmpty()) {
+                return response()->json(['status' => 'error', 'message' => 'Fulfillment not found'], 404);
+            }
+            if ($matches->count() > 1) {
+                $sessionIds = $matches->pluck('session_id')->unique();
+                if ($sessionIds->count() > 1) {
+                    return response()->json(['status' => 'error', 'message' => 'Ambiguous fulfillment match'], 409);
+                }
+            }
+
+            $fulfillment = $matches->first();
+
+            $shop = Session::find($fulfillment->session_id);
+            $normalized = $this->normalizeCargoStatusResponse(
+                ['data' => $data, 'errors' => false],
+                $fulfillment->tracking_number ?: $shipmentIdStr
+            );
+            $this->shippingStatusUpdate($normalized, $fulfillment, $shop);
+
+            // Keep cron throttle in sync after a successful push update.
+            if ($fulfillment->shopify_order_id) {
+                Order::where('session_id', $fulfillment->session_id)
+                    ->where('shopify_order_id', $fulfillment->shopify_order_id)
+                    ->update(['last_tracking_status_check_time' => now()]);
+            }
+
+            return response()->json(['status' => 'success']);
+        } catch (\Throwable $e) {
+            try {
+                $log = new ErrorMessage();
+                $log->message = 'Cargo webhook error: ' . $e->getMessage() . ' line:' . $e->getLine();
+                $log->save();
+            } catch (\Throwable $ignored) {
+            }
+
+            return response()->json(['status' => 'error', 'message' => 'Server error'], 500);
         }
-
-        $fulfillment = $matches->first();
-
-        $shop = Session::find($fulfillment->session_id);
-        $normalized = $this->normalizeCargoStatusResponse(
-            ['data' => $data, 'errors' => false],
-            $fulfillment->tracking_number ?: $shipmentIdStr
-        );
-        $this->shippingStatusUpdate($normalized, $fulfillment, $shop);
-
-        return response()->json(['status' => 'success']);
     }
 
     public function carrier_register($tracking_number, $carrier=null)
