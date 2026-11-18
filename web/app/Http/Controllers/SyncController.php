@@ -1497,6 +1497,13 @@ QUERY;
                                 $add_usagecharges = 1;
                             }
 
+                            $c_date = Carbon::now();
+                            $n_date = Carbon::parse($shop->created_at)->addDay(5);
+                            // After day 5: bonus tracking if under 100 lifetime pulls — same as webhooks and bulk sync.
+                            if (!$n_date->greaterThan($c_date) && $shop->total_shipment_track < 100) {
+                                $track_shipping = 1;
+                            }
+
                             $anySuccess = false;
 
                             foreach ($fulfillments as $fulfillment) {
